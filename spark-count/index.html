@@ -1,0 +1,1079 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Spark Count</title>
+<style>
+  :root {
+    --bg: #1a1238;
+    --hint: rgba(230, 222, 255, 0.8);
+    --btn-bg: rgba(255, 255, 255, 0.12);
+    --btn-fg: #efeaff;
+    --mode: dark;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #f1eefb; --hint: rgba(40, 30, 90, 0.65);
+      --btn-bg: rgba(40, 30, 90, 0.1); --btn-fg: #2a1f66; --mode: light;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #f1eefb; --hint: rgba(40, 30, 90, 0.65);
+    --btn-bg: rgba(40, 30, 90, 0.1); --btn-fg: #2a1f66; --mode: light;
+  }
+  :root[data-theme="dark"] {
+    --bg: #1a1238; --hint: rgba(230, 222, 255, 0.8);
+    --btn-bg: rgba(255, 255, 255, 0.12); --btn-fg: #efeaff; --mode: dark;
+  }
+  html, body { height: 100%; margin: 0; overflow: hidden; background: var(--bg); }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; display: block; }
+  #hint {
+    position: fixed; left: 0; right: 0; bottom: 24%;
+    text-align: center; pointer-events: none;
+    font: 600 20px/1.4 "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+    color: var(--hint); transition: opacity 0.8s;
+  }
+  #controls {
+    position: fixed; top: 0; right: 0; display: flex; gap: 8px;
+    margin: calc(env(safe-area-inset-top, 0px) + 14px) 14px 0 0;
+  }
+  #controls button {
+    font: 600 16px/1 "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+    color: var(--btn-fg); background: var(--btn-bg);
+    border: 0; border-radius: 999px; padding: 12px 18px; cursor: pointer;
+  }
+  #sound { min-width: 46px; padding: 10px 12px; font-size: 20px; }
+  #controls button:focus-visible { outline: 3px solid var(--btn-fg); outline-offset: 2px; }
+  .note {
+    position: fixed; top: 0; left: 0; max-width: 60%;
+    margin: calc(env(safe-area-inset-top, 0px) + 16px) 0 0 16px;
+    font: 500 14px/1.35 "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+    color: var(--hint); pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="controls">
+  <button id="sound" type="button" aria-label="Turn sound off">🔊</button>
+  <button id="reset" type="button">Start over</button>
+</div>
+<div id="hint">Tap to count!</div>
+<script>
+const canvas = document.getElementById('c');
+const hint = document.getElementById('hint');
+const FONT = '"Trebuchet MS", "Arial Black", system-ui, sans-serif';
+let W, H, dpr;
+
+function showNote(text) {
+  const n = document.createElement('div');
+  n.className = 'note'; n.textContent = text;
+  document.body.appendChild(n);
+}
+
+// =====================================================================
+// Sound effects: all made on the fly with the Web Audio API, no sound files
+// =====================================================================
+const Sfx = (() => {
+  let ac = null, master = null, noiseBuf = null, sprayGain = null;
+  let on = true;
+  try { on = localStorage.getItem('sparkcount-sound') !== 'off'; } catch (e) {}
+
+  function start() {                          // browsers only allow audio after a tap
+    if (ac) { if (ac.state === 'suspended') ac.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    ac = new AC();
+    const comp = ac.createDynamicsCompressor();
+    master = ac.createGain();
+    master.gain.value = on ? 0.55 : 0;
+    master.connect(comp); comp.connect(ac.destination);
+    noiseBuf = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
+    const d = noiseBuf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    // Continuous water rush for dragging the boat; its volume follows the boat's speed
+    const src = ac.createBufferSource();
+    src.buffer = noiseBuf; src.loop = true;
+    const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1100; bp.Q.value = 0.8;
+    sprayGain = ac.createGain(); sprayGain.gain.value = 0;
+    src.connect(bp); bp.connect(sprayGain); sprayGain.connect(master);
+    src.start();
+  }
+  const ready = () => ac && on && ac.state === 'running';
+
+  function tone(freq, freqEnd, dur, vol, type = 'sine', delay = 0) {
+    const t = ac.currentTime + delay;
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    if (freqEnd !== freq) o.frequency.exponentialRampToValueAtTime(freqEnd, t + dur);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(master);
+    o.start(t); o.stop(t + dur + 0.05);
+    return o;
+  }
+  function noise(dur, vol, type, f0, f1, delay = 0, q = 1) {
+    const t = ac.currentTime + delay;
+    const src = ac.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+    const f = ac.createBiquadFilter(); f.type = type; f.Q.value = q;
+    f.frequency.setValueAtTime(f0, t);
+    f.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(f); f.connect(g); g.connect(master);
+    src.start(t, Math.random() * 0.5); src.stop(t + dur + 0.05);
+  }
+
+  const SCALE = [0, 2, 4, 7, 9];              // pentatonic: every note sounds nice
+  return {
+    start,
+    get on() { return on; },
+    toggle() {
+      on = !on;
+      try { localStorage.setItem('sparkcount-sound', on ? 'on' : 'off'); } catch (e) {}
+      if (master) master.gain.setTargetAtTime(on ? 0.55 : 0, ac.currentTime, 0.05);
+      return on;
+    },
+    // Each count plays the next note up the scale
+    chime(n) {
+      if (!ready()) return;
+      const k = (n - 1) % 15;
+      const semi = SCALE[k % 5] + 12 * Math.floor(k / 5);
+      const f = 523.25 * Math.pow(2, semi / 12);
+      tone(f, f, 0.7, 0.22, 'triangle');
+      tone(f * 2, f * 2, 0.45, 0.06, 'sine');
+      noise(0.07, 0.25, 'bandpass', 1800, 600, 0, 1.5);           // the tap "pop"
+      for (let i = 0; i < 5; i++)                                 // twinkles as the dots gather
+        tone(1800 + Math.random() * 1600, 2400 + Math.random() * 1600, 0.12, 0.035, 'sine', 0.12 + i * 0.07);
+    },
+    boom() {
+      if (!ready()) return;
+      tone(130, 38, 0.6, 0.45, 'sine');
+      noise(0.35, 0.18, 'lowpass', 900, 120);
+      for (let i = 0; i < 14; i++)                                // crackle
+        noise(0.03, 0.12 + Math.random() * 0.1, 'highpass', 2500, 4000, 0.15 + Math.random() * 0.7);
+    },
+    plop() {
+      if (!ready()) return;
+      tone(900, 240, 0.13, 0.22, 'sine');
+      noise(0.12, 0.08, 'bandpass', 2000, 800);
+    },
+    splash(power) {
+      if (!ready()) return;
+      const p = Math.min(1, Math.max(0.2, power));
+      noise(0.25 + 0.5 * p, 0.25 + 0.3 * p, 'lowpass', 3500, 300, 0, 0.7);
+      tone(500, 120, 0.2, 0.18 * p, 'sine');
+    },
+    ribbit() {
+      if (!ready()) return;
+      for (let i = 0; i < 2; i++) {
+        const t = ac.currentTime + i * 0.17;
+        const o = ac.createOscillator(); o.type = 'square';
+        o.frequency.setValueAtTime(240, t);
+        o.frequency.exponentialRampToValueAtTime(170, t + 0.11);
+        const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1300;
+        const g = ac.createGain();
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(0.16, t + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+        const trem = ac.createOscillator(); trem.frequency.value = 38;  // the throaty flutter
+        const tg = ac.createGain(); tg.gain.value = 0.08;
+        trem.connect(tg); tg.connect(g.gain);
+        o.connect(lp); lp.connect(g); g.connect(master);
+        o.start(t); o.stop(t + 0.15); trem.start(t); trem.stop(t + 0.15);
+      }
+    },
+    wheee() {
+      if (!ready()) return;
+      const o = tone(520, 1150, 0.45, 0.13, 'sine');
+      const lfo = ac.createOscillator(), lg = ac.createGain();
+      lfo.frequency.value = 9; lg.gain.value = 25;
+      lfo.connect(lg); lg.connect(o.frequency);
+      lfo.start(); lfo.stop(ac.currentTime + 0.5);
+    },
+    spray(level) {
+      if (!sprayGain) return;
+      sprayGain.gain.setTargetAtTime(on ? Math.min(0.3, level) : 0, ac.currentTime, 0.08);
+    },
+    duck() {                                  // quieter effects while the voice says the number
+      if (!ready()) return;
+      const t = ac.currentTime;
+      master.gain.cancelScheduledValues(t);
+      master.gain.setTargetAtTime(0.3, t, 0.03);
+      master.gain.setTargetAtTime(0.55, t + 0.9, 0.2);
+    },
+  };
+})();
+
+// =====================================================================
+// WebGL setup
+// =====================================================================
+const gl = canvas.getContext('webgl', { alpha: false, antialias: false, premultipliedAlpha: true });
+if (!gl) showNote('This browser can\'t run WebGL, so the animation can\'t start.');
+
+// One shader draws every particle as a GPU point sprite.
+// shape 0 = glowing spark, shape 1 = plain dot
+const PARTICLE_VS = `
+attribute vec2 a_pos; attribute float a_size; attribute vec4 a_col; attribute float a_shape;
+uniform vec2 u_res;
+varying vec4 v_col; varying float v_shape; varying float v_size;
+void main() {
+  vec2 c = a_pos / u_res * 2.0 - 1.0;
+  gl_Position = vec4(c.x, -c.y, 0.0, 1.0);
+  gl_PointSize = a_size;
+  v_col = a_col; v_shape = a_shape; v_size = a_size;
+}`;
+const PARTICLE_FS = `
+precision mediump float;
+varying vec4 v_col; varying float v_shape; varying float v_size;
+void main() {
+  float d = length(gl_PointCoord - 0.5) * 2.0;
+  if (d > 1.0) discard;
+  vec3 col = v_col.rgb;
+  float a;
+  if (v_shape < 0.5) {
+    float core = 1.0 - smoothstep(0.0, 0.38, d);
+    float halo = pow(1.0 - d, 2.5) * 0.35;
+    col = mix(col, vec3(1.0), core * 0.55);
+    a = clamp(core + halo, 0.0, 1.0);
+  } else {
+    float edge = 2.0 / max(v_size, 1.0);
+    a = 1.0 - smoothstep(1.0 - edge, 1.0, d);
+  }
+  a *= v_col.a;
+  gl_FragColor = vec4(col * a, a);
+}`;
+// Full-screen quad that paints a see-through layer of background: this makes the trails
+const FADE_VS = `attribute vec2 p; void main(){ gl_Position = vec4(p, 0.0, 1.0); }`;
+const FADE_FS = `precision mediump float; uniform vec4 u_c;
+void main(){ gl_FragColor = vec4(u_c.rgb * u_c.a, u_c.a); }`;
+// Copies the trail texture to the screen (later: bloom, blur, distortion go here)
+const BLIT_VS = `attribute vec2 p; varying vec2 uv;
+void main(){ uv = p * 0.5 + 0.5; gl_Position = vec4(p, 0.0, 1.0); }`;
+const BLIT_FS = `precision mediump float; varying vec2 uv; uniform sampler2D t;
+void main(){ gl_FragColor = texture2D(t, uv); }`;
+
+// Water: triangles with a color per corner
+const COLOR_VS = `
+attribute vec2 a_pos; attribute vec4 a_col; uniform vec2 u_res; varying vec4 v_col;
+void main() {
+  vec2 c = a_pos / u_res * 2.0 - 1.0;
+  gl_Position = vec4(c.x, -c.y, 0.0, 1.0);
+  v_col = a_col;
+}`;
+const COLOR_FS = `precision mediump float; varying vec4 v_col;
+void main(){ gl_FragColor = vec4(v_col.rgb * v_col.a, v_col.a); }`;
+// Boat: a picture drawn once, then moved and tilted by the GPU each frame
+const TEX_VS = `
+attribute vec2 a_pos; attribute vec2 a_uv; uniform vec2 u_res; varying vec2 uv;
+void main() {
+  vec2 c = a_pos / u_res * 2.0 - 1.0;
+  gl_Position = vec4(c.x, -c.y, 0.0, 1.0);
+  uv = a_uv;
+}`;
+const TEX_FS = `precision mediump float; varying vec2 uv; uniform sampler2D t;
+void main(){ gl_FragColor = texture2D(t, uv); }`;
+
+function program(vs, fs) {
+  const make = (type, src) => {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  };
+  const p = gl.createProgram();
+  gl.attachShader(p, make(gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, make(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  return p;
+}
+
+let partProg, fadeProg, blitProg, colorProg, texProg, quadBuf, partBuf, waterBuf, boatBuf, boatTex;
+let loc = {}, maxPoint = 64;
+let fbo = null, fboTex = null;
+const FLOATS = 8;                           // x, y, size, r, g, b, a, shape
+const SMAX = 20000, DMAX = 4000;
+const gpuData = new Float32Array((SMAX + DMAX) * FLOATS);
+const WMAX = 260;                                     // most water columns we'll ever use
+const waterData = new Float32Array(WMAX * 2 * 6);     // x, y, r, g, b, a per corner
+const boatData = new Float32Array(4 * 4);             // x, y, u, v per corner
+
+// ---- The boat and frog, painted once with ordinary 2D drawing ----
+const BOAT_TW = 320, BOAT_TH = 260, BOAT_WL = 208 / 260;   // waterline sits at this height in the picture
+// Each face is its own picture; the frog swaps between them as things happen.
+const FACES = ['happy', 'blink', 'excited', 'awe', 'splashed', 'sleepy'];
+
+function drawBoat(face) {
+  const c = document.createElement('canvas');
+  c.width = BOAT_TW * 2; c.height = BOAT_TH * 2;
+  const g = c.getContext('2d');
+  g.scale(2, 2);
+  g.lineJoin = 'round'; g.lineCap = 'round';
+  const oval = (x, y, rx, ry) => { g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); };
+  const frog = '#4cbb47', frogDark = '#2c6e2a', ink = '#1d1d1d', mouthRed = '#7a1f2b';
+
+  // Body
+  g.fillStyle = frog; g.strokeStyle = frogDark; g.lineWidth = 4;
+  oval(118, 150, 22, 16); g.fill(); g.stroke();
+  oval(202, 150, 22, 16); g.fill(); g.stroke();
+  oval(160, 135, 48, 36); g.fill(); g.stroke();
+  g.fillStyle = '#d4f09a'; oval(160, 147, 28, 19); g.fill();
+
+  // Eyes
+  for (const ex of [136, 184]) {
+    const inner = ex < 160 ? 1 : -1;            // direction toward the middle of the face
+    g.fillStyle = frog; g.strokeStyle = frogDark; g.lineWidth = 4;
+    oval(ex, 100, 17, 17); g.fill(); g.stroke();
+    g.strokeStyle = frogDark; g.lineWidth = 3.5;
+
+    if (face === 'blink') {
+      g.beginPath(); g.arc(ex, 96, 9, 0.15 * Math.PI, 0.85 * Math.PI); g.stroke();
+    } else if (face === 'splashed') {           // squeezed shut: > <
+      g.strokeStyle = ink;
+      g.beginPath();
+      g.moveTo(ex - 7 * inner, 93); g.lineTo(ex + 5 * inner, 100); g.lineTo(ex - 7 * inner, 107);
+      g.stroke();
+    } else if (face === 'sleepy') {             // heavy eyelids
+      g.fillStyle = '#ffffff'; oval(ex, 101, 11, 10); g.fill();
+      g.fillStyle = ink; oval(ex, 104, 4.5, 4.5); g.fill();
+      g.save(); oval(ex, 100, 15, 15); g.clip();
+      g.fillStyle = frog; g.fillRect(ex - 16, 84, 32, 17);
+      g.restore();
+      g.beginPath(); g.moveTo(ex - 11, 101); g.lineTo(ex + 11, 101); g.stroke();
+    } else {
+      const big = face === 'excited' || face === 'awe';
+      const r = big ? 12.5 : 11;
+      g.fillStyle = '#ffffff'; oval(ex, 99, r, r); g.fill();
+      let px = ex + 3 * inner, py = 100, pr = 5.5;
+      if (face === 'excited') { px = ex; py = 99; pr = 7; }
+      if (face === 'awe') { px = ex + inner; py = 93; pr = 5; }   // looking up at the number
+      g.fillStyle = ink; oval(px, py, pr, pr); g.fill();
+      g.fillStyle = '#ffffff'; oval(px - 2, py - 2.5, pr * 0.35, pr * 0.35); g.fill();
+      if (face === 'excited') { oval(px + 2.5, py + 2, 1.2, 1.2); g.fill(); }
+    }
+  }
+
+  // Mouth
+  g.strokeStyle = frogDark; g.lineWidth = 3.5;
+  if (face === 'excited') {                     // big open grin
+    g.fillStyle = mouthRed;
+    g.beginPath(); g.moveTo(141, 115); g.arc(160, 115, 19, 0, Math.PI); g.closePath(); g.fill();
+    g.save(); g.clip();
+    g.fillStyle = '#ff8fa3'; oval(160, 131, 10, 6); g.fill();
+    g.restore();
+    g.stroke();
+  } else if (face === 'awe') {                  // little "ooh"
+    g.fillStyle = mouthRed; oval(160, 123, 6.5, 8.5); g.fill(); g.stroke();
+  } else if (face === 'splashed') {             // wobbly "pfft"
+    g.beginPath(); g.moveTo(144, 122);
+    for (let i = 1; i <= 8; i++) g.lineTo(144 + i * 4, 122 + (i % 2 ? -3 : 3));
+    g.stroke();
+  } else if (face === 'sleepy') {
+    g.beginPath(); g.moveTo(152, 123); g.quadraticCurveTo(160, 126, 168, 123); g.stroke();
+  } else {
+    g.beginPath(); g.arc(160, 116, 14, 0.2 * Math.PI, 0.8 * Math.PI); g.stroke();
+  }
+
+  // Cheeks
+  g.fillStyle = face === 'excited' ? 'rgba(255, 100, 125, 0.75)' : 'rgba(255, 120, 140, 0.55)';
+  oval(133, 124, 6, 6); g.fill(); oval(187, 124, 6, 6); g.fill();
+
+  // Extras
+  if (face === 'splashed') {                    // water dripping off his head
+    g.fillStyle = '#8fd0ff'; g.strokeStyle = '#3a86c8'; g.lineWidth = 2;
+    for (const [dx, dy, sz] of [[108, 84, 1], [214, 80, 1.2], [226, 102, 0.8]]) {
+      g.beginPath();
+      g.moveTo(dx, dy - 9 * sz);
+      g.quadraticCurveTo(dx + 6 * sz, dy, dx, dy + 5 * sz);
+      g.quadraticCurveTo(dx - 6 * sz, dy, dx, dy - 9 * sz);
+      g.fill(); g.stroke();
+    }
+  }
+  if (face === 'excited') {                     // little cheer lines
+    g.strokeStyle = '#ffc93c'; g.lineWidth = 4;
+    for (const [x1, y1, x2, y2] of [[100, 76, 90, 64], [96, 96, 82, 94], [220, 76, 230, 64], [224, 96, 238, 94]]) {
+      g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke();
+    }
+  }
+  if (face === 'sleepy') {
+    g.fillStyle = frogDark;
+    g.font = '700 22px "Trebuchet MS", system-ui, sans-serif';
+    g.fillText('z', 212, 82);
+    g.font = '700 16px "Trebuchet MS", system-ui, sans-serif';
+    g.fillText('z', 230, 66);
+  }
+
+  // Hull
+  const hull = new Path2D();
+  hull.moveTo(16, 162); hull.lineTo(304, 162);
+  hull.quadraticCurveTo(292, 202, 255, 230);
+  hull.lineTo(65, 230);
+  hull.quadraticCurveTo(28, 202, 16, 162);
+  hull.closePath();
+  g.fillStyle = '#e8553d'; g.fill(hull);
+  g.save(); g.clip(hull);
+  g.fillStyle = '#fff3e0'; g.fillRect(0, 182, 320, 9);
+  g.fillStyle = 'rgba(0, 0, 0, 0.12)'; g.fillRect(0, 212, 320, 30);
+  g.restore();
+  g.strokeStyle = '#8a2f20'; g.lineWidth = 4; g.stroke(hull);
+  g.beginPath(); g.moveTo(16, 160); g.lineTo(304, 160);
+  g.lineWidth = 12; g.stroke();
+
+  // Front feet: holding the rail, or waving when excited
+  g.fillStyle = frog; g.strokeStyle = frogDark; g.lineWidth = 3;
+  if (face === 'excited') {
+    oval(112, 120, 8, 12); g.fill(); g.stroke();
+    oval(208, 120, 8, 12); g.fill(); g.stroke();
+  } else {
+    oval(140, 162, 11, 7); g.fill(); g.stroke();
+    oval(180, 162, 11, 7); g.fill(); g.stroke();
+  }
+  return c;
+}
+const boatPictures = {};
+for (const f of FACES) boatPictures[f] = drawBoat(f);
+
+function initGL() {
+  partProg = program(PARTICLE_VS, PARTICLE_FS);
+  fadeProg = program(FADE_VS, FADE_FS);
+  blitProg = program(BLIT_VS, BLIT_FS);
+  loc = {
+    pos: gl.getAttribLocation(partProg, 'a_pos'),
+    size: gl.getAttribLocation(partProg, 'a_size'),
+    col: gl.getAttribLocation(partProg, 'a_col'),
+    shape: gl.getAttribLocation(partProg, 'a_shape'),
+    res: gl.getUniformLocation(partProg, 'u_res'),
+    fadeP: gl.getAttribLocation(fadeProg, 'p'),
+    fadeC: gl.getUniformLocation(fadeProg, 'u_c'),
+    blitP: gl.getAttribLocation(blitProg, 'p'),
+    blitT: gl.getUniformLocation(blitProg, 't'),
+  };
+  colorProg = program(COLOR_VS, COLOR_FS);
+  texProg = program(TEX_VS, TEX_FS);
+  loc.cPos = gl.getAttribLocation(colorProg, 'a_pos');
+  loc.cCol = gl.getAttribLocation(colorProg, 'a_col');
+  loc.cRes = gl.getUniformLocation(colorProg, 'u_res');
+  loc.tPos = gl.getAttribLocation(texProg, 'a_pos');
+  loc.tUV = gl.getAttribLocation(texProg, 'a_uv');
+  loc.tRes = gl.getUniformLocation(texProg, 'u_res');
+  loc.tT = gl.getUniformLocation(texProg, 't');
+  waterBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, waterBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, waterData.byteLength, gl.DYNAMIC_DRAW);
+  boatBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, boatBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, boatData.byteLength, gl.DYNAMIC_DRAW);
+  boatTex = {};
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+  for (const f of FACES) {
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, boatPictures[f]);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    boatTex[f] = tex;
+  }
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+  quadBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+  partBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, partBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, gpuData.byteLength, gl.DYNAMIC_DRAW);
+  maxPoint = gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE)[1];
+  fbo = null;
+}
+
+// Off-screen texture that keeps the trails between frames
+function makeTarget() {
+  if (fboTex) gl.deleteTexture(fboTex);
+  if (fbo) gl.deleteFramebuffer(fbo);
+  fboTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, fboTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, canvas.width, canvas.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fboTex, 0);
+  clearTarget();
+}
+function clearTarget() {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.clearColor(theme.bg[0], theme.bg[1], theme.bg[2], 1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+}
+
+// =====================================================================
+// Theme and colors
+// =====================================================================
+let theme = {};
+let sparkRGB = [], dotRGB = [];
+
+function hsl(h, s, l) {
+  s /= 100; l /= 100;
+  const k = n => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+  return [f(0), f(8), f(4)];
+}
+function readTheme() {
+  const dark = getComputedStyle(document.documentElement).getPropertyValue('--mode').trim() !== 'light';
+  theme = dark
+    ? { glow: true,  bg: [26 / 255, 18 / 255, 56 / 255],   fade: 0.22,
+        waterTop: [0.22, 0.52, 0.86, 0.80], waterDeep: [0.08, 0.14, 0.42, 0.95],
+        waterLine: [0.70, 0.90, 1.00, 0.95], drop: [0.72, 0.89, 1.00] }
+    : { glow: false, bg: [241 / 255, 238 / 255, 251 / 255], fade: 0.25,
+        waterTop: [0.38, 0.68, 0.95, 0.78], waterDeep: [0.14, 0.36, 0.78, 0.92],
+        waterLine: [0.92, 0.97, 1.00, 0.95], drop: [0.30, 0.58, 0.92] };
+  sparkRGB = []; dotRGB = [];
+  for (let h = 0; h < 360; h++) {
+    sparkRGB.push(hsl(h, 95, dark ? 62 : 46));
+    dotRGB.push(hsl(h, 95, dark ? 68 : 45));
+  }
+  if (fbo) clearTarget();
+}
+readTheme();
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', readTheme);
+new MutationObserver(readTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);   // the GPU handles full sharpness
+  W = innerWidth; H = innerHeight;
+  canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+  if (gl) makeTarget();
+  setupWater();
+}
+
+if (gl) {
+  try { initGL(); } catch (e) { showNote('The animation couldn\'t start on this device.'); console.error(e); }
+  canvas.addEventListener('webglcontextlost', e => e.preventDefault());
+  canvas.addEventListener('webglcontextrestored', () => { initGL(); makeTarget(); });
+}
+addEventListener('resize', resize);
+
+// =====================================================================
+// Water: a row of springy columns. Push one and the wave spreads to its neighbors.
+// =====================================================================
+let restY = 0, wN = 0, wSp = 1, tNow = 0, waterAcc = 0;
+const wH = new Float32Array(WMAX), wV = new Float32Array(WMAX);
+const wL = new Float32Array(WMAX), wR = new Float32Array(WMAX);
+const TENSION = 0.025, DAMPING = 0.02, SPREAD = 0.2;
+
+function setupWater() {
+  restY = H * 0.78;
+  wN = Math.max(60, Math.min(WMAX, Math.round(W / 5)));
+  wSp = W / (wN - 1);
+  wH.fill(0); wV.fill(0);
+  boat.w = Math.max(110, Math.min(190, W * 0.32));
+  boat.h = boat.w * BOAT_TH / BOAT_TW;
+  if (!boat.placed) { boat.x = W * 0.5; boat.y = restY; boat.placed = true; }
+  boat.x = Math.min(Math.max(boat.x, boat.w / 2), W - boat.w / 2);
+}
+
+const ambient = x => Math.sin(x * 0.018 + tNow * 1.6) * 2.5 + Math.sin(x * 0.041 - tNow * 1.1) * 1.5;
+function surfAt(x) {
+  let f = x / wSp;
+  if (f < 0) f = 0; else if (f > wN - 1) f = wN - 1;
+  const i = Math.min(wN - 2, f | 0), u = f - i;
+  return restY + wH[i] * (1 - u) + wH[i + 1] * u + ambient(x);
+}
+function poke(x, amount) {               // positive pushes the surface down
+  const i = Math.round(x / wSp);
+  if (i >= 0 && i < wN) wV[i] += Math.max(-25, Math.min(25, amount));
+}
+function stepWater() {
+  for (let i = 0; i < wN; i++) {
+    wV[i] += -TENSION * wH[i] - DAMPING * wV[i];
+    wH[i] += wV[i];
+  }
+  for (let pass = 0; pass < 6; pass++) {
+    for (let i = 0; i < wN; i++) {
+      if (i > 0)      { wL[i] = SPREAD * (wH[i] - wH[i - 1]); wV[i - 1] += wL[i]; }
+      if (i < wN - 1) { wR[i] = SPREAD * (wH[i] - wH[i + 1]); wV[i + 1] += wR[i]; }
+    }
+    for (let i = 0; i < wN; i++) {
+      if (i > 0) wH[i - 1] += wL[i];
+      if (i < wN - 1) wH[i + 1] += wR[i];
+    }
+  }
+  const lim = H * 0.15;
+  for (let i = 0; i < wN; i++) wH[i] = Math.max(-lim, Math.min(lim, wH[i]));
+}
+
+// =====================================================================
+// Boat: floats on the surface, tilts with the waves, and can be dragged or thrown
+// =====================================================================
+const boat = { x: 0, y: 0, vx: 0, vy: 0, a: 0, va: 0, w: 120, h: 100, placed: false, spray: 0, freeTime: 0 };
+let drag = null;
+
+// ---- Frog mood: picks a face from what's happening ----
+const mood = { face: 'happy', splash: 0, awe: 0, idle: 0, blinkIn: 3, blink: 0 };
+function updateMood(dt, airborne) {
+  mood.splash -= dt; mood.awe -= dt; mood.idle += dt;
+  mood.blinkIn -= dt; mood.blink -= dt;
+  if (mood.blinkIn <= 0) { mood.blink = 0.13; mood.blinkIn = 2.5 + Math.random() * 3; }
+  if (drag || airborne)      mood.face = 'excited';
+  else if (mood.splash > 0)  mood.face = 'splashed';
+  else if (mood.awe > 0)     mood.face = 'awe';
+  else if (mood.idle > 12)   mood.face = 'sleepy';
+  else if (mood.blink > 0)   mood.face = 'blink';
+  else                       mood.face = 'happy';
+}
+
+function boatHit(px, py) {
+  const c = Math.cos(-boat.a), s2 = Math.sin(-boat.a);
+  const lx = (px - boat.x) * c - (py - boat.y) * s2;
+  const ly = (px - boat.x) * s2 + (py - boat.y) * c;
+  const pad = 14;
+  return lx > -boat.w / 2 - pad && lx < boat.w / 2 + pad &&
+         ly > -BOAT_WL * boat.h - pad && ly < (1 - BOAT_WL) * boat.h + pad;
+}
+
+function splashDrops(x, y, n, dirX, power) {
+  for (let i = 0; i < n; i++) {
+    const side = dirX === 0 ? (Math.random() < 0.5 ? -1 : 1) : dirX;
+    addSpark(x + (Math.random() - 0.5) * 10, y - 2,
+      side * (40 + Math.random() * 160) * power,
+      -(160 + Math.random() * 280) * power,
+      0.25 + Math.random() * 0.3, 1.4 + Math.random() * 1.8, 0, 1);
+  }
+}
+
+function updateBoat(dt) {
+  const b = boat, half = b.w * 0.4;
+  const surf = (surfAt(b.x - half) + surfAt(b.x) * 2 + surfAt(b.x + half)) / 4;
+  const slope = (surfAt(b.x + half) - surfAt(b.x - half)) / (half * 2);
+  const before = b.y - surf;
+
+  if (drag) {
+    b.freeTime = 0;
+    const tx = Math.min(Math.max(drag.tx, b.w / 2), W - b.w / 2);
+    const ty = Math.min(Math.max(drag.ty, H * 0.12), restY + b.h * 0.35);
+    const k = 1 - Math.exp(-25 * dt);
+    const nx = b.x + (tx - b.x) * k, ny = b.y + (ty - b.y) * k;
+    b.vx = (nx - b.x) / dt; b.vy = (ny - b.y) / dt;
+    b.x = nx; b.y = ny;
+  } else {
+    if (before < 0) b.vy += 900 * dt;                    // in the air: fall
+    else {                                              // in the water: float back up
+      b.vy -= 60 * before * dt;
+      b.vy *= Math.exp(-5 * dt);
+      // Gentle bobbing only, unless the boat was just thrown
+      if (b.freeTime > 0.4) b.vy = Math.max(-260, Math.min(600, b.vy));
+      b.vx *= Math.exp(-1.5 * dt);
+      b.vx += slope * 500 * dt;                         // waves nudge the boat sideways
+    }
+    b.freeTime += dt;
+    b.x += b.vx * dt; b.y += b.vy * dt;
+    if (b.x < b.w / 2)     { b.x = b.w / 2;     b.vx = Math.abs(b.vx) * 0.5; }
+    if (b.x > W - b.w / 2) { b.x = W - b.w / 2; b.vx = -Math.abs(b.vx) * 0.5; }
+    if (b.y < H * 0.08) { b.y = H * 0.08; b.vy = Math.abs(b.vy) * 0.3; }
+  }
+  b.vx = Math.max(-2000, Math.min(2000, b.vx));
+  b.vy = Math.max(-2000, Math.min(2000, b.vy));
+
+  // Tilt: follow the wave slope, lean into fast drags
+  const depth = b.y - surf;
+  const inWater = depth > -b.h * 0.2;
+  let target = inWater ? Math.atan(slope) : b.a;
+  if (drag) target += Math.max(-0.4, Math.min(0.4, b.vx * 0.0004));
+  b.va += (target - b.a) * 40 * dt;
+  b.va *= Math.exp(-6 * dt);
+  b.a += b.va * dt;
+
+  // The boat pushes the water
+  if (inWater) {
+    const f = dt * 60;
+    if (b.vy > 0) for (let x = b.x - half; x <= b.x + half; x += wSp) poke(x, b.vy * 0.0005 * f);
+    if (Math.abs(b.vx) > 20) {
+      const dir = Math.sign(b.vx);
+      poke(b.x + dir * b.w * 0.48, -Math.abs(b.vx) * 0.0045 * f);   // bow wave rises
+      poke(b.x - dir * b.w * 0.48,  Math.abs(b.vx) * 0.0025 * f);   // trough behind
+    }
+    // Spray while moving fast
+    const speed = Math.hypot(b.vx, b.vy);
+    b.spray += Math.max(0, speed - 140) * 0.12 * dt;
+    while (b.spray >= 1) {
+      b.spray -= 1;
+      const dir = Math.abs(b.vx) > Math.abs(b.vy) ? Math.sign(b.vx) : 0;
+      const ex = dir ? b.x + dir * b.w * 0.45 : b.x + (Math.random() < 0.5 ? -1 : 1) * b.w * 0.45;
+      splashDrops(ex, surfAt(ex), 1, dir, 0.6 + Math.min(speed, 1200) / 1200);
+    }
+  }
+
+  const airborne = depth < -b.h * 0.15;
+  updateMood(dt, airborne);
+  const flying = airborne && !drag;
+  if (flying && !b.wasFlying) Sfx.wheee();
+  b.wasFlying = flying;
+  Sfx.spray(inWater ? Math.max(0, Math.hypot(b.vx, b.vy) - 80) / 3000 : 0);
+
+  // Big splash when the boat lands in the water
+  if (before < 0 && depth >= 0 && b.vy > 250) {
+    mood.splash = 1.3;
+    Sfx.splash(b.vy / 1100);
+    for (let x = b.x - half; x <= b.x + half; x += wSp) poke(x, b.vy * 0.003);
+    const n = Math.min(70, b.vy / 12) | 0;
+    splashDrops(b.x - b.w * 0.45, surfAt(b.x - b.w * 0.45), n >> 1, -1, b.vy / 700);
+    splashDrops(b.x + b.w * 0.45, surfAt(b.x + b.w * 0.45), n >> 1, 1, b.vy / 700);
+  }
+}
+
+resize();
+
+const wrapHue = h => ((Math.round(h) % 360) + 360) % 360;
+
+// =====================================================================
+// Particle pools (physics runs in JS, drawing runs on the GPU)
+// =====================================================================
+const GRAVITY = 900;
+const HOLD = 1.6;
+const sx = new Float32Array(SMAX), sy = new Float32Array(SMAX);
+const svx = new Float32Array(SMAX), svy = new Float32Array(SMAX);
+const sLife = new Float32Array(SMAX), sDecay = new Float32Array(SMAX);
+const sSize = new Float32Array(SMAX), sHue = new Uint16Array(SMAX);
+const sKind = new Uint8Array(SMAX);      // 0 = spark, 1 = water drop
+let sn = 0;
+
+function addSpark(x, y, vx, vy, decay, size, hue, kind = 0) {
+  const i = sn < SMAX ? sn++ : (Math.random() * SMAX) | 0;
+  sx[i] = x; sy[i] = y; svx[i] = vx; svy[i] = vy;
+  sLife[i] = 1; sDecay[i] = decay; sSize[i] = size; sHue[i] = wrapHue(hue); sKind[i] = kind;
+}
+
+const dx = new Float32Array(DMAX), dy = new Float32Array(DMAX);
+const dtx = new Float32Array(DMAX), dty = new Float32Array(DMAX);
+const dSize = new Float32Array(DMAX), dWob = new Float32Array(DMAX);
+const dHue = new Uint16Array(DMAX);
+let dn = 0, holdTimer = 0, count = 0, numCY = 0;
+
+function burst(x, y, n, power, hue) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const s = Math.sqrt(Math.random()) * 520 * power;
+    addSpark(x, y, Math.cos(a) * s, Math.sin(a) * s - 120 * power,
+      0.35 + Math.random() * 0.5, 1.5 + Math.random() * 2.5, hue + (Math.random() - 0.5) * 60);
+  }
+}
+
+// Number shapes: draw small (one pixel per particle) and read just that box
+const off = document.createElement('canvas');
+const offCtx = off.getContext('2d', { willReadFrequently: true });
+
+function pointsForNumber(n) {
+  const text = String(n);
+  let size = Math.min(Math.min(W, H) * 0.62, restY * 0.8);
+  offCtx.font = `900 ${size}px ${FONT}`;
+  const wide = offCtx.measureText(text).width;
+  if (wide > W * 0.86) size *= (W * 0.86) / wide;
+  const gap = Math.max(5, Math.round(size / 26));
+  const small = size / gap;
+  offCtx.font = `900 ${small}px ${FONT}`;
+  const bw = Math.ceil(offCtx.measureText(text).width) + 6;
+  const bh = Math.ceil(small * 1.2) + 6;
+  off.width = bw; off.height = bh;
+  offCtx.font = `900 ${small}px ${FONT}`;
+  offCtx.textAlign = 'center'; offCtx.textBaseline = 'middle';
+  offCtx.fillStyle = '#000';
+  offCtx.fillText(text, bw / 2, bh / 2);
+  const data = offCtx.getImageData(0, 0, bw, bh).data;
+  numCY = restY * 0.52;
+  const pts = [];
+  for (let y = 0; y < bh; y++)
+    for (let x = 0; x < bw; x++)
+      if (data[(y * bw + x) * 4 + 3] > 110)
+        pts.push(W / 2 + (x - bw / 2) * gap, numCY + (y - bh / 2) * gap);
+  return pts;
+}
+
+function explodeDigits() {
+  if (dn) Sfx.boom();
+  const cx = W / 2;
+  for (let i = 0; i < dn; i++) {
+    const ox = dx[i] - cx, oy = dy[i] - numCY;
+    addSpark(dx[i], dy[i],
+      ox * 3.5 + (Math.random() - 0.5) * 260,
+      oy * 3.5 + (Math.random() - 0.5) * 260 - 260,
+      0.3 + Math.random() * 0.4, dSize[i], dHue[i]);
+  }
+  dn = 0;
+}
+
+// =====================================================================
+// Speech
+// =====================================================================
+const voiceOK = 'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined';
+let voice = null;
+function pickVoice() {
+  try {
+    const all = speechSynthesis.getVoices();
+    voice = all.find(v => /^en[-_]/i.test(v.lang) && v.localService)
+         || all.find(v => /^en/i.test(v.lang)) || all[0] || null;
+  } catch (e) {}
+}
+if (voiceOK) {
+  pickVoice();
+  speechSynthesis.addEventListener?.('voiceschanged', pickVoice);
+}
+function speak(n) {
+  if (!voiceOK || !Sfx.on) return;
+  try {
+    const say = () => {
+      const u = new SpeechSynthesisUtterance(String(n));
+      u.lang = voice ? voice.lang : 'en-US';
+      if (voice) u.voice = voice;
+      u.rate = 0.9; u.pitch = 1.2; u.volume = 1;
+      speechSynthesis.resume();
+      speechSynthesis.speak(u);
+    };
+    if (speechSynthesis.speaking || speechSynthesis.pending) {
+      speechSynthesis.cancel();
+      setTimeout(say, 60);
+    } else say();
+  } catch (e) {}
+}
+if (!voiceOK) showNote('No voice here. Open this page in Chrome to hear the numbers.');
+
+function countUp(x, y) {
+  if (dn) explodeDigits();
+  count++;
+  const hue = (count * 47) % 360;
+  burst(x, y, 70, 0.8, hue);
+  const pts = pointsForNumber(count);
+  for (let k = 0; k < pts.length && dn < DMAX; k += 2) {
+    const i = dn++;
+    dx[i] = x + (Math.random() - 0.5) * 30; dy[i] = y + (Math.random() - 0.5) * 30;
+    dtx[i] = pts[k]; dty[i] = pts[k + 1];
+    dSize[i] = 2.2 + Math.random() * 1.8;
+    dHue[i] = wrapHue(hue + (Math.random() - 0.5) * 40);
+    dWob[i] = Math.random() * Math.PI * 2;
+  }
+  holdTimer = HOLD;
+  mood.awe = HOLD + 1.2;
+  Sfx.chime(count);
+  Sfx.duck();
+  speak(count);
+}
+
+// =====================================================================
+// Main loop: update physics, pack everything into one buffer, one draw call
+// =====================================================================
+let last = performance.now();
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min((now - last) / 1000, 0.033);
+  last = now;
+  const t = now / 1000;
+  tNow = t;
+  const glow = theme.glow;
+
+  waterAcc = Math.min(waterAcc + dt, 4 / 60);
+  while (waterAcc >= 1 / 60) { stepWater(); waterAcc -= 1 / 60; }
+  updateBoat(dt);
+  const halo = glow ? 2.6 : 1.15;
+  let k = 0;
+  const put = (x, y, diameterCss, rgb, a, shape) => {
+    gpuData[k++] = x; gpuData[k++] = y;
+    gpuData[k++] = Math.min(diameterCss * dpr, maxPoint);
+    gpuData[k++] = rgb[0]; gpuData[k++] = rgb[1]; gpuData[k++] = rgb[2];
+    gpuData[k++] = a; gpuData[k++] = shape;
+  };
+
+  // Number particles glide into place as plain dots
+  const pull = 1 - Math.exp(-7 * dt);
+  for (let i = 0; i < dn; i++) {
+    dx[i] += (dtx[i] - dx[i]) * pull;
+    dy[i] += (dty[i] - dy[i]) * pull;
+    put(dx[i] + Math.sin(t * 6 + dWob[i]) * 0.6, dy[i], dSize[i] * 2, dotRGB[dHue[i]], 1, 1);
+  }
+  if (dn) { holdTimer -= dt; if (holdTimer <= 0) explodeDigits(); }
+
+  // Free sparks
+  const airDrag = Math.exp(-1.6 * dt);
+  const g = GRAVITY * dt;
+  let i = 0;
+  while (i < sn) {
+    sLife[i] -= sDecay[i] * dt;
+    const prevY = sy[i];
+    svy[i] = (svy[i] + g) * airDrag;
+    svx[i] *= airDrag;
+    sx[i] += svx[i] * dt; sy[i] += svy[i] * dt;
+    const size = sSize[i];
+    if (sy[i] > H - size) { sy[i] = H - size; svy[i] *= -0.45; svx[i] *= 0.8; }
+
+    // Falling into the water: make a ripple and disappear
+    const surf = surfAt(sx[i]);
+    if (prevY <= surf && sy[i] > surf && svy[i] > 0) {
+      poke(sx[i], svy[i] * (sKind[i] ? 0.0015 : 0.0004) * size);
+      sLife[i] = 0;
+    }
+
+    if (sLife[i] <= 0) {
+      sn--;
+      sx[i] = sx[sn]; sy[i] = sy[sn]; svx[i] = svx[sn]; svy[i] = svy[sn];
+      sLife[i] = sLife[sn]; sDecay[i] = sDecay[sn]; sSize[i] = sSize[sn];
+      sHue[i] = sHue[sn]; sKind[i] = sKind[sn];
+      continue;
+    }
+    const life = sLife[i];
+    if (sKind[i]) put(sx[i], sy[i], size * 2, theme.drop, Math.min(1, life * 1.6), 1);
+    else put(sx[i], sy[i], size * (0.5 + life * 0.5) * halo * 2, sparkRGB[sHue[i]], life, glow ? 0 : 1);
+    i++;
+  }
+
+  if (!gl || !partProg || gl.isContextLost()) return;
+
+  // 1. Fade the trail texture toward the background
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  gl.useProgram(fadeProg);
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+  gl.enableVertexAttribArray(loc.fadeP);
+  gl.vertexAttribPointer(loc.fadeP, 2, gl.FLOAT, false, 0, 0);
+  gl.uniform4f(loc.fadeC, theme.bg[0], theme.bg[1], theme.bg[2], theme.fade);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.disableVertexAttribArray(loc.fadeP);
+
+  // 2. Draw every particle in a single call
+  const nPoints = k / FLOATS;
+  if (nPoints) {
+    gl.blendFunc(gl.ONE, glow ? gl.ONE : gl.ONE_MINUS_SRC_ALPHA);   // additive glow in dark mode
+    gl.useProgram(partProg);
+    gl.uniform2f(loc.res, W, H);
+    gl.bindBuffer(gl.ARRAY_BUFFER, partBuf);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, gpuData.subarray(0, k));
+    const stride = FLOATS * 4;
+    gl.enableVertexAttribArray(loc.pos);   gl.vertexAttribPointer(loc.pos, 2, gl.FLOAT, false, stride, 0);
+    gl.enableVertexAttribArray(loc.size);  gl.vertexAttribPointer(loc.size, 1, gl.FLOAT, false, stride, 8);
+    gl.enableVertexAttribArray(loc.col);   gl.vertexAttribPointer(loc.col, 4, gl.FLOAT, false, stride, 12);
+    gl.enableVertexAttribArray(loc.shape); gl.vertexAttribPointer(loc.shape, 1, gl.FLOAT, false, stride, 28);
+    gl.drawArrays(gl.POINTS, 0, nPoints);
+    gl.disableVertexAttribArray(loc.pos); gl.disableVertexAttribArray(loc.size);
+    gl.disableVertexAttribArray(loc.col); gl.disableVertexAttribArray(loc.shape);
+  }
+
+  // 3. Show the trail texture on screen
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.disable(gl.BLEND);
+  gl.useProgram(blitProg);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, fboTex);
+  gl.uniform1i(loc.blitT, 0);
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+  gl.enableVertexAttribArray(loc.blitP);
+  gl.vertexAttribPointer(loc.blitP, 2, gl.FLOAT, false, 0, 0);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.disableVertexAttribArray(loc.blitP);
+
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+
+  // 4. Boat (drawn before the water so the hull shows through it)
+  {
+    const b = boat, c = Math.cos(b.a), sn2 = Math.sin(b.a);
+    const top = -BOAT_WL * b.h, bot = (1 - BOAT_WL) * b.h, l = -b.w / 2, r = b.w / 2;
+    const corners = [[l, top, 0, 0], [r, top, 1, 0], [l, bot, 0, 1], [r, bot, 1, 1]];
+    let q = 0;
+    for (const [lx, ly, u, v] of corners) {
+      boatData[q++] = b.x + lx * c - ly * sn2;
+      boatData[q++] = b.y + lx * sn2 + ly * c;
+      boatData[q++] = u; boatData[q++] = v;
+    }
+    gl.useProgram(texProg);
+    gl.uniform2f(loc.tRes, W, H);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, boatTex[mood.face]);
+    gl.uniform1i(loc.tT, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, boatBuf);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, boatData);
+    gl.enableVertexAttribArray(loc.tPos); gl.vertexAttribPointer(loc.tPos, 2, gl.FLOAT, false, 16, 0);
+    gl.enableVertexAttribArray(loc.tUV);  gl.vertexAttribPointer(loc.tUV, 2, gl.FLOAT, false, 16, 8);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.disableVertexAttribArray(loc.tPos); gl.disableVertexAttribArray(loc.tUV);
+  }
+
+  // 5. Water body, then a bright line along the surface
+  gl.useProgram(colorProg);
+  gl.uniform2f(loc.cRes, W, H);
+  gl.bindBuffer(gl.ARRAY_BUFFER, waterBuf);
+  gl.enableVertexAttribArray(loc.cPos); gl.vertexAttribPointer(loc.cPos, 2, gl.FLOAT, false, 24, 0);
+  gl.enableVertexAttribArray(loc.cCol); gl.vertexAttribPointer(loc.cCol, 4, gl.FLOAT, false, 24, 8);
+  const strip = (lower, topCol, botCol) => {
+    let q = 0;
+    for (let j = 0; j < wN; j++) {
+      const x = j * wSp, y = surfAt(x);
+      waterData[q++] = x; waterData[q++] = y;
+      waterData[q++] = topCol[0]; waterData[q++] = topCol[1]; waterData[q++] = topCol[2]; waterData[q++] = topCol[3];
+      waterData[q++] = x; waterData[q++] = lower(y);
+      waterData[q++] = botCol[0]; waterData[q++] = botCol[1]; waterData[q++] = botCol[2]; waterData[q++] = botCol[3];
+    }
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, waterData.subarray(0, q));
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, wN * 2);
+  };
+  strip(() => H + 2, theme.waterTop, theme.waterDeep);
+  const wl = theme.waterLine;
+  strip(y => y + 3.5, wl, [wl[0], wl[1], wl[2], 0]);
+  gl.disableVertexAttribArray(loc.cPos); gl.disableVertexAttribArray(loc.cCol);
+}
+requestAnimationFrame(frame);
+
+canvas.addEventListener('pointerdown', e => {
+  const x = e.clientX, y = e.clientY;
+  Sfx.start();
+  hint.style.opacity = 0;
+  mood.idle = 0;
+  if (!drag && boatHit(x, y)) {                     // grab the boat
+    drag = { id: e.pointerId, ox: x - boat.x, oy: y - boat.y, tx: boat.x, ty: boat.y };
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+    Sfx.ribbit();
+    return;
+  }
+  if (y > surfAt(x)) {                              // tapping the water splashes it
+    poke(x, 8);
+    splashDrops(x, surfAt(x), 14, 0, 0.9);
+    Sfx.plop();
+  }
+  countUp(x, y);
+});
+canvas.addEventListener('pointermove', e => {
+  if (drag && e.pointerId === drag.id) {
+    drag.tx = e.clientX - drag.ox;
+    drag.ty = e.clientY - drag.oy;
+  }
+});
+const letGo = e => { if (drag && e.pointerId === drag.id) drag = null; };
+canvas.addEventListener('pointerup', letGo);
+canvas.addEventListener('pointercancel', letGo);
+const soundBtn = document.getElementById('sound');
+const showSound = () => {
+  soundBtn.textContent = Sfx.on ? '🔊' : '🔇';
+  soundBtn.setAttribute('aria-label', Sfx.on ? 'Turn sound off' : 'Turn sound on');
+};
+showSound();
+soundBtn.addEventListener('click', () => { Sfx.start(); Sfx.toggle(); showSound(); });
+document.getElementById('reset').addEventListener('click', () => {
+  Sfx.start();
+  explodeDigits();
+  count = 0;
+  hint.style.opacity = 1;
+});
+</script>
+</body>
+</html>
