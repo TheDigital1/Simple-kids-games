@@ -1,0 +1,19 @@
+{
+  "name": "Spark Count",
+  "short_name": "Spark Count",
+  "description": "Tap to count! Sparks gather into numbers that are read aloud, and a frog rides a boat on the water.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "any",
+  "background_color": "#1a1238",
+  "theme_color": "#1a1238",
+  "categories": ["kids", "education", "games"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
