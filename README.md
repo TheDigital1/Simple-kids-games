@@ -9,7 +9,7 @@ Small, self-contained browser games for kids. Each game is a single HTML file �
 | Game | Play | Description |
 | --- | --- | --- |
 | Spark Count | [▶ Play now](https://thedigital1.github.io/Simple-kids-games/spark-count/) | Tap the screen to count up: each tap bursts into sparks that gather into the next number, which is read aloud. A frog in a boat floats on the water and can be dragged and tossed for a splash. |
-| Bubble Pop | [▶ Play now](https://thedigital1.github.io/Simple-kids-games/bubble-pop/) | A bunny blows bubbles: first 1, then 4, then 8 at a time. Pop as many as you can in one minute! Bubbles drift on the breeze, and popping one pushes its neighbors away. |
+| Bubble Pop | [▶ Play now](https://thedigital1.github.io/Simple-kids-games/bubble-pop/) | A bunny blows bubbles: first 1, then 4, then 8 — and after that it blows a new one for every pop, so there are always 8 to chase. Pop as many as you can in one minute! Bubbles drift on the breeze, and popping one pushes its neighbors away. |
 
 ## Install as an app
 

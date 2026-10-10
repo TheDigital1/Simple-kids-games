@@ -1,6 +1,6 @@
 // Offline support: keep a copy of the game so it opens without internet.
 // Bump VERSION whenever a file below changes so devices pick up the new copy.
-const VERSION = 'bubble-pop-v1';
+const VERSION = 'bubble-pop-v2';
 const FILES = [
   './',
   'index.html',
