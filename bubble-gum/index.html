@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bubble Gum</title>
+<meta name="description" content="Blow a bubble gum bubble just the right size! Hold to blow, let go to stop. Don't let it pop!">
+<meta name="theme-color" content="#ffe3f0" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#2a1d4f" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Bubble Gum">
+<style>
+  :root {
+    --bg: #ffe3f0;
+    --hud-bg: rgba(255, 255, 255, 0.75);
+    --hud-fg: #3a1f5c;
+    --card-bg: #ffffff;
+    --card-fg: #3a1f5c;
+    --muted: rgba(58, 31, 92, 0.72);
+    --chip-bg: #fff0f7;
+    --accent: #ff4f9a;
+    --accent-dark: #c62f74;
+    --mode: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #2a1d4f; --hud-bg: rgba(25, 16, 56, 0.62); --hud-fg: #f6eeff;
+      --card-bg: #2e2163; --card-fg: #f6eeff; --muted: rgba(246, 238, 255, 0.75);
+      --chip-bg: #3d2d7a; --mode: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #2a1d4f; --hud-bg: rgba(25, 16, 56, 0.62); --hud-fg: #f6eeff;
+    --card-bg: #2e2163; --card-fg: #f6eeff; --muted: rgba(246, 238, 255, 0.75);
+    --chip-bg: #3d2d7a; --mode: dark;
+  }
+  html, body { height: 100%; margin: 0; overflow: hidden; background: var(--bg); }
+  body {
+    font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+    -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+  }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; display: block; }
+  [hidden] { display: none !important; }
+
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0;
+    display: grid; grid-template-columns: 1fr auto 1fr; align-items: start;
+    padding: calc(env(safe-area-inset-top, 0px) + 12px) calc(env(safe-area-inset-right, 0px) + 14px) 0 calc(env(safe-area-inset-left, 0px) + 14px);
+    pointer-events: none;
+  }
+  .pill {
+    background: var(--hud-bg); color: var(--hud-fg);
+    border-radius: 999px; font-weight: 800;
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    box-shadow: 0 2px 10px rgba(60, 20, 80, 0.12);
+  }
+  #round, #total { display: flex; flex-direction: column; align-items: center; padding: 6px 20px 10px; }
+  #round { justify-self: start; }
+  #round small, #total small { font-size: 12px; letter-spacing: 0.14em; opacity: 0.75; }
+  #roundNum { font-size: 26px; line-height: 1.3; font-variant-numeric: tabular-nums; }
+  #totalNum { font-size: 36px; line-height: 1; font-variant-numeric: tabular-nums; min-width: 56px; text-align: center; }
+  #totalNum.bump { animation: bump 0.35s ease-out; }
+  @keyframes bump { 40% { transform: scale(1.3); } }
+  #sound {
+    justify-self: end; pointer-events: auto; cursor: pointer; border: 0;
+    font-size: 22px; line-height: 1; padding: 11px 13px;
+  }
+  #sound:focus-visible, .play:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+
+  #hint {
+    position: fixed; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
+    display: flex; justify-content: center; pointer-events: none;
+  }
+  #hint span { padding: 10px 18px; font-size: 19px; text-align: center; max-width: calc(100% - 32px); box-sizing: border-box; }
+
+  .overlay {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    padding: 16px; background: rgba(40, 10, 60, 0.25);
+  }
+  .card {
+    background: var(--card-bg); color: var(--card-fg);
+    border-radius: 28px; padding: 28px 22px 30px; width: 100%; max-width: 380px;
+    text-align: center; box-shadow: 0 18px 50px rgba(40, 10, 60, 0.3);
+    box-sizing: border-box;
+  }
+  .card h1, .card h2 { margin: 0 0 10px; font-size: 38px; line-height: 1.1; }
+  .card p { margin: 0; font-size: 18px; line-height: 1.4; color: var(--muted); }
+  .card ul { margin: 12px 0 0; padding: 0; list-style: none; font-size: 17px; line-height: 1.5; color: var(--muted); text-align: left; display: inline-block; }
+  .big { font-size: 68px; font-weight: 900; line-height: 1; color: var(--accent); margin: 8px 0 2px; font-variant-numeric: tabular-nums; }
+  #rounds { display: flex; justify-content: center; gap: 6px; margin: 14px 0 4px; flex-wrap: wrap; }
+  #rounds span {
+    background: var(--chip-bg); border-radius: 12px; padding: 6px 0; width: 52px;
+    font-weight: 800; font-size: 18px; font-variant-numeric: tabular-nums;
+  }
+  #best { margin-top: 10px; font-weight: 700; }
+  .play {
+    font: 800 26px/1 "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+    color: #fff; background: var(--accent); border: 0; border-radius: 999px;
+    padding: 18px 44px; margin-top: 22px; cursor: pointer;
+    box-shadow: 0 6px 0 var(--accent-dark);
+  }
+  .play:active { transform: translateY(4px); box-shadow: 0 2px 0 var(--accent-dark); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud">
+  <div id="round" class="pill" aria-label="Round"><small>ROUND</small><span id="roundNum">1/5</span></div>
+  <div id="total" class="pill" aria-live="polite"><small>SCORE</small><span id="totalNum">0</span></div>
+  <button id="sound" class="pill" type="button" aria-label="Turn sound off">🔊</button>
+</div>
+<div id="hint" aria-live="polite"><span class="pill" id="hintText"></span></div>
+
+<div id="startScreen" class="overlay">
+  <div class="card">
+    <h1>Bubble Gum</h1>
+    <p>Blow the bubble up to the circle. Don't let it pop!</p>
+    <ul>
+      <li>👆 Hold to blow</li>
+      <li>✋ Let go to stop</li>
+      <li>🎯 Wait 3 seconds to score</li>
+    </ul>
+    <br><button class="play" id="startBtn" type="button">Play ▶</button>
+  </div>
+</div>
+
+<div id="endScreen" class="overlay" hidden>
+  <div class="card">
+    <h2>All done!</h2>
+    <p>Your score</p>
+    <div class="big" id="finalScore">0</div>
+    <p>out of 500</p>
+    <div id="rounds"></div>
+    <p id="best"></p>
+    <button class="play" id="againBtn" type="button">Play again ▶</button>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const $ = id => document.getElementById(id);
+
+const ROUNDS = 5;
+const WAIT = 3;            // seconds without blowing before a round is scored
+const BREATH = 0.22;       // a full breath grows the bubble by this much of the biggest circle
+const TAU = 0.35;          // how fast a breath runs out (seconds): fast at first, then tapering
+const BREATH_LEN = 1.4;    // after this long, holding does nothing more
+const START_R = 0.07;      // gum on the lips before blowing
+let W, H, dpr, playTop, Rmax, mouthX, mouthY, head;
+
+// =====================================================================
+// Sound effects, made on the fly with the Web Audio API
+// =====================================================================
+const Sfx = (() => {
+  let ac = null, master = null, noiseBuf = null, breathGain = null, breathFilter = null;
+  let on = true;
+  try { on = localStorage.getItem('bubblegum-sound') !== 'off'; } catch (e) {}
+
+  function start() {                           // browsers only allow audio after a tap
+    if (ac) { if (ac.state === 'suspended') ac.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    ac = new AC();
+    const comp = ac.createDynamicsCompressor();
+    master = ac.createGain();
+    master.gain.value = on ? 0.6 : 0;
+    master.connect(comp); comp.connect(ac.destination);
+    noiseBuf = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
+    const d = noiseBuf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    // Continuous breath sound; its volume follows how hard the boy is blowing
+    const src = ac.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+    breathFilter = ac.createBiquadFilter(); breathFilter.type = 'bandpass'; breathFilter.frequency.value = 700; breathFilter.Q.value = 0.7;
+    breathGain = ac.createGain(); breathGain.gain.value = 0;
+    src.connect(breathFilter); breathFilter.connect(breathGain); breathGain.connect(master);
+    src.start();
+  }
+  const ready = () => ac && on && ac.state === 'running';
+
+  function tone(freq, freqEnd, dur, vol, type = 'sine', delay = 0) {
+    const t = ac.currentTime + delay;
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    if (freqEnd !== freq) o.frequency.exponentialRampToValueAtTime(freqEnd, t + dur);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(master);
+    o.start(t); o.stop(t + dur + 0.05);
+  }
+  function noise(dur, vol, type, f0, f1, delay = 0, q = 1) {
+    const t = ac.currentTime + delay;
+    const src = ac.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+    const f = ac.createBiquadFilter(); f.type = type; f.Q.value = q;
+    f.frequency.setValueAtTime(f0, t);
+    f.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(f); f.connect(g); g.connect(master);
+    src.start(t, Math.random() * 0.5); src.stop(t + dur + 0.05);
+  }
+
+  return {
+    start,
+    get on() { return on; },
+    toggle() {
+      on = !on;
+      try { localStorage.setItem('bubblegum-sound', on ? 'on' : 'off'); } catch (e) {}
+      if (master) master.gain.setTargetAtTime(on ? 0.6 : 0, ac.currentTime, 0.05);
+      return on;
+    },
+    breath(level, size) {
+      if (!breathGain) return;
+      breathGain.gain.setTargetAtTime(on ? level * 0.22 : 0, ac.currentTime, 0.04);
+      breathFilter.frequency.setTargetAtTime(500 + 500 * (1 - size), ac.currentTime, 0.1);
+    },
+    pop() {
+      if (!ready()) return;
+      noise(0.25, 0.7, 'lowpass', 4000, 300, 0, 0.7);
+      tone(180, 50, 0.3, 0.5, 'sine');
+      noise(0.35, 0.18, 'bandpass', 900, 300, 0.08, 2);          // the gooey splat
+    },
+    slurp() {
+      if (!ready()) return;
+      noise(0.35, 0.12, 'bandpass', 1500, 400, 0, 3);
+      tone(700, 250, 0.3, 0.06, 'sine');
+    },
+    appear() {
+      if (!ready()) return;
+      tone(660, 990, 0.18, 0.1, 'triangle');
+    },
+    tick() {
+      if (!ready()) return;
+      tone(1200, 1200, 0.05, 0.06, 'square');
+    },
+    result(score) {
+      if (!ready()) return;
+      const notes = score >= 100 ? [523, 659, 784, 1047, 1319] : score >= 75 ? [523, 659, 784, 1047]
+                  : score >= 50 ? [523, 659, 784] : score > 0 ? [523, 659] : [392, 330];
+      notes.forEach((f, i) => tone(f, f, i === notes.length - 1 ? 0.45 : 0.18, 0.15, 'triangle', i * 0.1));
+    },
+    fanfare() {
+      if (!ready()) return;
+      [523, 659, 784, 659, 784, 1047].forEach((f, i) => tone(f, f, i === 5 ? 0.7 : 0.18, 0.15, 'triangle', i * 0.12));
+    },
+  };
+})();
+
+// =====================================================================
+// Theme and background
+// =====================================================================
+let dark = false;
+const bg = document.createElement('canvas');
+const bgCtx = bg.getContext('2d');
+function readTheme() {
+  dark = getComputedStyle(document.documentElement).getPropertyValue('--mode').trim() === 'dark';
+  if (W) paintBackground();
+}
+function paintBackground() {
+  bg.width = canvas.width; bg.height = canvas.height;
+  const g = bgCtx;
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const grad = g.createLinearGradient(0, 0, 0, H);
+  if (dark) { grad.addColorStop(0, '#231945'); grad.addColorStop(1, '#4a2f6e'); }
+  else      { grad.addColorStop(0, '#fff4fa'); grad.addColorStop(1, '#ffd3e8'); }
+  g.fillStyle = grad; g.fillRect(0, 0, W, H);
+  // Candy confetti
+  let seed = 5; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const colors = dark ? ['#ff8fc6', '#8fd3ff', '#ffe08a', '#b79bff'] : ['#ff9cc9', '#9fd8ff', '#ffe08a', '#c7a8ff'];
+  const n = Math.round(W * H / 9000);
+  for (let i = 0; i < n; i++) {
+    g.fillStyle = colors[i % colors.length];
+    g.globalAlpha = dark ? 0.35 : 0.5;
+    const x = rnd() * W, y = rnd() * H, s = 2 + rnd() * 4;
+    if (i % 3) { g.beginPath(); g.arc(x, y, s, 0, Math.PI * 2); g.fill(); }
+    else { g.save(); g.translate(x, y); g.rotate(rnd() * Math.PI); g.fillRect(-s * 1.6, -s * 0.45, s * 3.2, s * 0.9); g.restore(); }
+  }
+  g.globalAlpha = 1;
+}
+
+// =====================================================================
+// The boy, facing us. Unit space: head radius = 100, origin at the head's center.
+// =====================================================================
+// <boy>
+const MOUTH_Y = 52;                            // mouth position below the head's center, in head units
+function drawBoy(g, x, y, size, st) {
+  // st: { puff 0..1, face: 'happy' | 'blow' | 'look' | 'proud' | 'oops', blink, lookY }
+  const k = size / 100;
+  g.save();
+  g.translate(x, y); g.scale(k, k);
+  g.lineJoin = 'round'; g.lineCap = 'round';
+  const skin = '#f7c9a1', skinLine = '#d99a6c', hair = '#6b3f1f', hairLine = '#4a2a12';
+  const ell = (ex, ey, rx, ry, rot = 0) => { g.beginPath(); g.ellipse(ex, ey, rx, ry, rot, 0, Math.PI * 2); };
+
+  // Shirt: rounded shoulders that run off the bottom of the screen
+  g.save();
+  g.beginPath();
+  g.moveTo(-150, 2000); g.lineTo(-150, 190);
+  g.quadraticCurveTo(-150, 112, -60, 105); g.lineTo(60, 105);
+  g.quadraticCurveTo(150, 112, 150, 190); g.lineTo(150, 2000); g.closePath();
+  g.fillStyle = '#3f9bff'; g.fill();
+  g.clip();
+  g.fillStyle = 'rgba(255, 255, 255, 0.9)';
+  for (let sy = 150; sy < 1000; sy += 46) g.fillRect(-160, sy, 320, 16);
+  g.restore();
+  g.strokeStyle = '#2a6fc0'; g.lineWidth = 5;
+  g.beginPath(); g.moveTo(-150, 2000); g.lineTo(-150, 190); g.quadraticCurveTo(-150, 112, -60, 105);
+  g.moveTo(60, 105); g.quadraticCurveTo(150, 112, 150, 190); g.lineTo(150, 2000); g.stroke();
+  // Neck and collar
+  g.fillStyle = skin; g.fillRect(-26, 78, 52, 34);
+  g.fillStyle = '#ffd23f'; g.beginPath(); g.ellipse(0, 108, 44, 14, 0, 0, Math.PI); g.fill();
+
+  // Ears
+  for (const sx of [-1, 1]) {
+    ell(sx * 96, 8, 20, 24); g.fillStyle = skin; g.fill(); g.strokeStyle = skinLine; g.lineWidth = 4; g.stroke();
+    ell(sx * 98, 8, 9, 13); g.fillStyle = 'rgba(217, 140, 100, 0.45)'; g.fill();
+  }
+  // Head, with cheeks that puff out while blowing
+  ell(0, 0, 92, 98); g.fillStyle = skin; g.fill(); g.strokeStyle = skinLine; g.lineWidth = 4; g.stroke();
+  if (st.puff > 0.05) {
+    for (const sx of [-1, 1]) {
+      ell(sx * (54 + 8 * st.puff), 44, 24 + 12 * st.puff, 22 + 10 * st.puff);
+      g.fillStyle = skin; g.fill();
+    }
+  }
+  g.fillStyle = `rgba(255, 120, 140, ${0.35 + 0.25 * st.puff})`;
+  ell(-58, 34, 16, 10); g.fill(); ell(58, 34, 16, 10); g.fill();
+
+  // Hair: a rounded cap with a spiky fringe and a tuft on top
+  g.beginPath();
+  g.moveTo(-96, 6);
+  g.bezierCurveTo(-110, -90, -50, -122, 0, -120);
+  g.bezierCurveTo(50, -122, 110, -90, 96, 6);
+  g.lineTo(84, -36);
+  const spikes = [[64, -52], [46, -30], [26, -54], [6, -32], [-14, -56], [-34, -32], [-54, -54], [-72, -34]];
+  for (const [sx, sy] of spikes) g.lineTo(sx, sy);
+  g.lineTo(-86, -38);
+  g.closePath();
+  g.fillStyle = hair; g.fill(); g.strokeStyle = hairLine; g.lineWidth = 4; g.stroke();
+  g.beginPath(); g.moveTo(-6, -118); g.quadraticCurveTo(4, -150, 28, -146); g.quadraticCurveTo(14, -134, 14, -116);
+  g.fillStyle = hair; g.fill(); g.stroke();
+
+  // Eyes
+  const ink = '#2b1d33';
+  if (st.face === 'proud') {                   // happy closed eyes: ^ ^
+    g.strokeStyle = ink; g.lineWidth = 5;
+    for (const sx of [-1, 1]) { g.beginPath(); g.arc(sx * 36, -4, 14, 1.15 * Math.PI, 1.85 * Math.PI); g.stroke(); }
+  } else if (st.face === 'oops') {             // squeezed shut: > <
+    g.strokeStyle = ink; g.lineWidth = 5;
+    for (const sx of [-1, 1]) {
+      g.beginPath(); g.moveTo(sx * 48, -18); g.lineTo(sx * 30, -8); g.lineTo(sx * 48, 2); g.stroke();
+    }
+  } else if (st.blink) {
+    g.strokeStyle = ink; g.lineWidth = 4.5;
+    for (const sx of [-1, 1]) { g.beginPath(); g.arc(sx * 36, -12, 13, 0.15 * Math.PI, 0.85 * Math.PI); g.stroke(); }
+  } else {
+    const wide = st.face === 'look' ? 1.12 : 1;
+    for (const sx of [-1, 1]) {
+      ell(sx * 36, -10, 17 * wide, 20 * wide); g.fillStyle = '#ffffff'; g.fill();
+      g.strokeStyle = 'rgba(43, 29, 51, 0.25)'; g.lineWidth = 2; g.stroke();
+      const py = -10 + (st.lookY || 0) * 8;
+      ell(sx * 36 - sx * 2, py, 9, 10); g.fillStyle = ink; g.fill();
+      ell(sx * 36 - sx * 2 - 3, py - 4, 3, 3); g.fillStyle = '#ffffff'; g.fill();
+    }
+  }
+  // Eyebrows: raised when the bubble gets close to the line
+  g.strokeStyle = hairLine; g.lineWidth = 6;
+  const brow = st.face === 'look' ? -44 : -36;
+  for (const sx of [-1, 1]) { g.beginPath(); g.moveTo(sx * 22, brow); g.quadraticCurveTo(sx * 36, brow - 8, sx * 52, brow - 2); g.stroke(); }
+
+  // Nose
+  g.strokeStyle = skinLine; g.lineWidth = 4;
+  g.beginPath(); g.arc(0, 20, 8, 0.1 * Math.PI, 0.9 * Math.PI); g.stroke();
+
+  // Mouth: puckered lips while blowing, a big grin when proud, a smile otherwise
+  if (st.face === 'blow' || st.face === 'look') {
+    ell(0, MOUTH_Y, 12, 10); g.fillStyle = '#e8687c'; g.fill();
+    ell(0, MOUTH_Y, 5, 4); g.fillStyle = '#7a2436'; g.fill();
+  } else if (st.face === 'proud') {
+    g.beginPath(); g.moveTo(-28, MOUTH_Y - 6); g.quadraticCurveTo(0, MOUTH_Y + 30, 28, MOUTH_Y - 6); g.closePath();
+    g.fillStyle = '#7a2436'; g.fill();
+    g.save(); g.clip(); g.fillStyle = '#ffffff'; g.fillRect(-30, MOUTH_Y - 8, 60, 8); g.restore();
+  } else {
+    g.strokeStyle = '#a8424f'; g.lineWidth = 5;
+    g.beginPath(); g.arc(0, MOUTH_Y - 14, 20, 0.25 * Math.PI, 0.75 * Math.PI); g.stroke();
+  }
+  g.restore();
+}
+
+// A pink gum bubble with shine. r is the radius in pixels.
+function drawGum(g, x, y, r, wob = 0) {
+  if (r < 1) return;
+  g.save();
+  g.translate(x, y); g.scale(1 + wob, 1 - wob * 0.6);
+  const body = g.createRadialGradient(-r * 0.3, -r * 0.35, r * 0.05, 0, 0, r);
+  body.addColorStop(0, '#ffc2e0'); body.addColorStop(0.55, '#ff86bf'); body.addColorStop(1, '#f2589f');
+  g.fillStyle = body;
+  g.beginPath(); g.arc(0, 0, r, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = 'rgba(200, 40, 110, 0.55)'; g.lineWidth = Math.max(2, r * 0.03); g.stroke();
+  g.fillStyle = 'rgba(255, 255, 255, 0.75)';
+  g.beginPath(); g.ellipse(-r * 0.38, -r * 0.42, r * 0.22, r * 0.12, -0.75, 0, Math.PI * 2); g.fill();
+  g.beginPath(); g.arc(-r * 0.1, -r * 0.62, r * 0.045, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = 'rgba(255, 255, 255, 0.35)'; g.lineWidth = Math.max(1.5, r * 0.04);
+  g.beginPath(); g.arc(0, 0, r * 0.78, 0.12 * Math.PI, 0.45 * Math.PI); g.stroke();
+  g.restore();
+}
+// </boy>
+
+// =====================================================================
+// Layout
+// =====================================================================
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight;
+  canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+  playTop = $('hud').getBoundingClientRect().bottom + 8;
+  const avail = H - playTop, bottomSpace = 84;
+  // The biggest circle has to fit on screen, with the boy's hair (and its tuft) above it.
+  // Head radius is 0.75 Rmax; the tuft tops out about 1.53 Rmax above the mouth.
+  Rmax = Math.max(60, Math.min(W * 0.44, (avail - bottomSpace) / 2.55));
+  head = Rmax * 0.75;
+  const extra = Math.max(0, avail - bottomSpace - 2.55 * Rmax) * 0.4;
+  mouthX = W / 2;
+  mouthY = playTop + 1.55 * Rmax + extra;
+  paintBackground();
+}
+
+// =====================================================================
+// Game state
+// =====================================================================
+let state = 'intro';       // intro | appear | play | scored | popped | over
+let round = 0, total = 0, scores = [], goals = [];
+let r = 0, goal = 0;       // bubble and goal radius, as a fraction of Rmax
+let pressing = false, breathT = 0, blowRate = 0, blown = false, idle = 0, lastTick = 0;
+let stateT = 0, wob = 0, roundScore = 0, splat = 0, flash = 0;
+const boy = { puff: 0, blinkIn: 2, blink: 0 };
+const pieces = [];         // flying bits of gum after a pop
+let best = 0;
+try { best = +localStorage.getItem('bubblegum-best') || 0; } catch (e) {}
+
+const LINE = 5;            // goal circle line width in pixels
+const goalPx = () => goal * Rmax;
+const bubblePx = () => r * Rmax;
+
+// Different-sized circles every game: one from each size band, shuffled
+function pickGoals() {
+  const bands = [0.46, 0.56, 0.67, 0.78, 0.9];
+  for (let i = bands.length - 1; i > 0; i--) { const j = Math.random() * (i + 1) | 0; [bands[i], bands[j]] = [bands[j], bands[i]]; }
+  return bands.map(b => b + (Math.random() - 0.5) * 0.06);
+}
+
+function hint(text) { $('hintText').textContent = text; $('hint').hidden = !text; }
+function showHud() {
+  $('roundNum').textContent = `${Math.min(round + 1, ROUNDS)}/${ROUNDS}`;
+  $('totalNum').textContent = total;
+}
+
+function startGame() {
+  Sfx.start();
+  total = 0; scores = []; round = 0; goals = pickGoals();
+  $('startScreen').hidden = true; $('endScreen').hidden = true;
+  beginRound();
+}
+
+function beginRound() {
+  goal = goals[round];
+  r = START_R; blown = false; idle = 0; breathT = BREATH_LEN; blowRate = 0; lastTick = 0;
+  splat = 0; pieces.length = 0;
+  state = 'appear'; stateT = 0;
+  showHud();
+  hint('Hold to blow!');
+  Sfx.appear();
+}
+
+// The bubble's edge is past the outside of the line: pop!
+function checkPop() {
+  if (bubblePx() > goalPx() + LINE / 2) {
+    state = 'popped'; stateT = 0; roundScore = 0; scores.push(0);
+    pressing = false;
+    splat = 1; flash = 1;
+    Sfx.pop(); Sfx.breath(0, 0);
+    const R = bubblePx();
+    for (let i = 0; i < 26; i++) {
+      const a = Math.random() * Math.PI * 2, s = 300 + Math.random() * 600;
+      pieces.push({ x: mouthX + Math.cos(a) * R, y: mouthY + Math.sin(a) * R, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 200,
+                    r: 4 + Math.random() * 10, rot: Math.random() * 6, life: 1 });
+    }
+    r = 0;
+    hint('Pop! Too big — 0 points');
+    return true;
+  }
+  return false;
+}
+
+// 100 on the line; lose 2 points for every 1% short, so half size or smaller scores 0
+function scoreRound() {
+  const gp = goalPx(), bp = bubblePx();
+  const pts = gp - bp <= LINE / 2 ? 100 : Math.max(0, Math.round(100 - 200 * (gp - bp) / gp));
+  roundScore = pts; scores.push(pts); total += pts;
+  state = 'scored'; stateT = 0;
+  const el = $('totalNum');
+  el.textContent = total; el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump');
+  hint(pts >= 100 ? 'Perfect! 🎯' : pts >= 90 ? 'Amazing!' : pts >= 75 ? 'Great job!' : pts >= 50 ? 'Good!' : pts > 0 ? 'A bit small!' : 'Too small!');
+  Sfx.result(pts);
+}
+
+function nextRound() {
+  round++;
+  if (round < ROUNDS) { beginRound(); return; }
+  state = 'over'; stateT = 0;
+  hint('');
+  showHud();
+  Sfx.fanfare();
+  const isBest = total > best;
+  if (isBest) { best = total; try { localStorage.setItem('bubblegum-best', best); } catch (e) {} }
+  $('finalScore').textContent = total;
+  $('rounds').innerHTML = scores.map(s => `<span>${s}</span>`).join('');
+  $('best').textContent = isBest && total > 0 ? '⭐ New best score! ⭐' : `Best: ${best}`;
+  setTimeout(() => { $('endScreen').hidden = false; $('againBtn').focus({ preventScroll: true }); }, 600);
+}
+
+function update(dt) {
+  stateT += dt;
+  if (state === 'appear' && stateT > 0.7) { state = 'play'; stateT = 0; }
+
+  if (state === 'play' || state === 'appear') {
+    // A breath starts strong and fades away, like breathing out
+    blowRate = 0;
+    if (pressing && breathT < BREATH_LEN) {
+      blowRate = Math.exp(-breathT / TAU);
+      r += (BREATH / TAU) * blowRate * dt;
+      breathT += dt;
+      wob = Math.min(0.05, wob + blowRate * dt * 0.4);
+      if (checkPop()) return;
+    }
+    if (pressing) idle = 0;
+    else if (blown) {
+      idle += dt;
+      const left = Math.ceil(WAIT - idle);
+      if (left !== lastTick && left > 0) { lastTick = left; Sfx.tick(); }
+      if (idle >= WAIT) scoreRound();
+    }
+  }
+  Sfx.breath(blowRate, Math.min(1, r));
+  wob *= Math.exp(-4 * dt);
+
+  if (state === 'scored') {
+    // Show the result, then the boy sucks the bubble back in
+    if (stateT > 1.8) {
+      if (r > START_R) { if (stateT - dt <= 1.8) Sfx.slurp(); r = Math.max(START_R, r - dt * 1.6); }
+      if (stateT > 2.6) nextRound();
+    }
+  }
+  if (state === 'popped') {
+    if (stateT > 1.4) splat = Math.max(0, splat - dt * 1.5);  // wipes the gum off
+    if (stateT > 2.6) nextRound();
+  }
+  for (let i = pieces.length - 1; i >= 0; i--) {
+    const p = pieces[i];
+    p.vy += 1400 * dt; p.vx *= Math.exp(-1.5 * dt);
+    p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt * 0.9;
+    if (p.life <= 0 || p.y > H + 40) pieces.splice(i, 1);
+  }
+  flash = Math.max(0, flash - dt * 3);
+
+  // Boy's face
+  const blowing = blowRate > 0.02;
+  boy.puff += ((blowing ? Math.min(1, 0.4 + blowRate) : 0) - boy.puff) * (1 - Math.exp(-14 * dt));
+  boy.blinkIn -= dt; boy.blink -= dt;
+  if (boy.blinkIn <= 0) { boy.blink = 0.13; boy.blinkIn = 2 + Math.random() * 3; }
+}
+
+// =====================================================================
+// Drawing
+// =====================================================================
+function drawGoal(t) {
+  const gp = goalPx();
+  const appear = state === 'appear' ? Math.min(1, stateT / 0.5) : 1;
+  const s = 1 - Math.pow(1 - appear, 3);
+  const close = state === 'play' && blown ? Math.max(0, 1 - Math.abs(goalPx() - bubblePx()) / (gp * 0.15)) : 0;
+  ctx.save();
+  ctx.translate(mouthX, mouthY); ctx.scale(s, s);
+  ctx.globalAlpha = appear;
+  // Soft glow, stronger as the bubble gets close
+  ctx.strokeStyle = dark ? `rgba(255, 230, 120, ${0.25 + 0.4 * close})` : `rgba(255, 170, 40, ${0.25 + 0.4 * close})`;
+  ctx.lineWidth = LINE + 8 + 6 * close;
+  ctx.beginPath(); ctx.arc(0, 0, gp, 0, Math.PI * 2); ctx.stroke();
+  ctx.strokeStyle = dark ? '#ffe27a' : '#7a3cff';
+  ctx.lineWidth = LINE;
+  ctx.setLineDash([16, 10]); ctx.lineDashOffset = -t * 20;
+  ctx.beginPath(); ctx.arc(0, 0, gp, 0, Math.PI * 2); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+// Pink goo stuck all over the boy's face after a pop
+function drawSplat() {
+  if (splat <= 0) return;
+  const k = head / 100;
+  ctx.save();
+  ctx.translate(mouthX, mouthY - MOUTH_Y * k); ctx.scale(k, k);
+  ctx.globalAlpha = Math.min(1, splat * 1.4);
+  ctx.fillStyle = '#ff7db8'; ctx.strokeStyle = '#e04c94'; ctx.lineWidth = 4;
+  ctx.beginPath();
+  const N = 22;
+  for (let i = 0; i <= N; i++) {
+    const a = (i / N) * Math.PI * 2;
+    const rr = 95 + (i % 2 ? 22 : -8) + Math.sin(i * 2.3) * 10;
+    const px = Math.cos(a) * rr * 1.05, py = 30 + Math.sin(a) * rr * 0.92;
+    i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+  }
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  // Drips
+  for (const [dx, len] of [[-50, 60], [10, 85], [62, 45]]) {
+    ctx.beginPath(); ctx.moveTo(dx - 12, 110); ctx.lineTo(dx - 9, 110 + len); ctx.arc(dx, 110 + len, 9, Math.PI, 0, true);
+    ctx.lineTo(dx + 12, 110); ctx.closePath(); ctx.fill();
+  }
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+  ctx.beginPath(); ctx.ellipse(-52, -28, 18, 8, -0.5, 0, Math.PI * 2); ctx.fill();
+  // Eyes peeking out of the gum
+  ctx.strokeStyle = '#2b1d33'; ctx.lineWidth = 5;
+  for (const sx of [-1, 1]) { ctx.beginPath(); ctx.moveTo(sx * 48, -18); ctx.lineTo(sx * 30, -8); ctx.lineTo(sx * 48, 2); ctx.stroke(); }
+  ctx.restore();
+}
+
+function drawWaitRing() {
+  if (state !== 'play' || !blown || pressing || idle <= 0) return;
+  // A little pie that fills up while waiting to score, under the bubble
+  const x = mouthX, y = Math.min(H - 110, mouthY + Math.max(goalPx(), bubblePx()) + 30), rr = 16;
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+  ctx.beginPath(); ctx.arc(x, y, rr + 3, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#7a3cff';
+  ctx.beginPath(); ctx.moveTo(x, y); ctx.arc(x, y, rr, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, idle / WAIT)); ctx.closePath(); ctx.fill();
+}
+
+function drawResult() {
+  if (state !== 'scored' && state !== 'popped') return;
+  const a = Math.min(1, stateT / 0.25);
+  const pop = 1 + 0.3 * Math.max(0, 1 - stateT / 0.3);
+  const y = Math.max(playTop + 40, mouthY - Math.max(goalPx(), head * 1.7) - 10);
+  ctx.save();
+  ctx.translate(mouthX, y); ctx.scale(pop, pop);
+  ctx.globalAlpha = state === 'scored' && stateT > 1.8 ? Math.max(0, 1 - (stateT - 1.8) / 0.6) : a;
+  ctx.font = `900 ${Math.round(Math.min(64, Rmax * 0.3))}px "Trebuchet MS", system-ui, sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.lineWidth = 8; ctx.strokeStyle = dark ? '#231945' : '#ffffff';
+  const text = state === 'popped' ? '0' : roundScore >= 100 ? '100!' : String(roundScore);
+  ctx.strokeText(text, 0, 0);
+  ctx.fillStyle = state === 'popped' ? '#ff4f9a' : roundScore >= 90 ? '#ffb000' : '#7a3cff';
+  ctx.fillText(text, 0, 0);
+  ctx.restore();
+}
+
+let last = performance.now();
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min((now - last) / 1000, 0.05);
+  last = now;
+  const t = now / 1000;
+  update(dt);
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(bg, 0, 0);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  const near = state === 'play' && blown && bubblePx() > goalPx() * 0.85;
+  const face = state === 'popped' ? 'oops'
+             : state === 'scored' ? (roundScore >= 75 ? 'proud' : 'happy')
+             : blowRate > 0.02 ? (near ? 'look' : 'blow')
+             : (state === 'play' && blown) ? (near ? 'look' : 'blow') : 'happy';
+  const headY = mouthY - MOUTH_Y * head / 100;
+  drawBoy(ctx, mouthX, headY, head, { puff: boy.puff, face, blink: boy.blink > 0, lookY: 0.4 });
+
+  if (state !== 'intro' && state !== 'over') drawGoal(t);
+  if (state !== 'popped') drawGum(ctx, mouthX, mouthY, bubblePx(), wob * Math.sin(t * 30));
+  drawSplat();
+  for (const p of pieces) {
+    ctx.save(); ctx.globalAlpha = Math.max(0, p.life);
+    ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+    ctx.fillStyle = '#ff7db8'; ctx.beginPath(); ctx.ellipse(0, 0, p.r, p.r * 0.6, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+  drawWaitRing();
+  drawResult();
+  if (flash > 0) { ctx.fillStyle = `rgba(255, 255, 255, ${flash * 0.5})`; ctx.fillRect(0, 0, W, H); }
+}
+
+// =====================================================================
+// Input: hold anywhere to blow, let go to stop
+// =====================================================================
+const held = new Set();
+function press(id) {
+  Sfx.start();
+  held.add(id);
+  if (pressing || (state !== 'play' && state !== 'appear')) return;
+  pressing = true; breathT = 0; blown = true; idle = 0; lastTick = 0;
+  hint('Let go to stop');
+}
+function release(id) {
+  held.delete(id);
+  if (held.size || !pressing) return;
+  pressing = false;
+  if (state === 'play' || state === 'appear') hint('Wait to score, or hold for more');
+}
+canvas.addEventListener('pointerdown', e => { press(e.pointerId); try { canvas.setPointerCapture(e.pointerId); } catch (err) {} });
+canvas.addEventListener('pointerup', e => release(e.pointerId));
+canvas.addEventListener('pointercancel', e => release(e.pointerId));
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+addEventListener('keydown', e => { if (e.code === 'Space' && !e.repeat && document.activeElement?.tagName !== 'BUTTON') { e.preventDefault(); press('key'); } });
+addEventListener('keyup', e => { if (e.code === 'Space') release('key'); });
+addEventListener('blur', () => { held.clear(); if (pressing) release('none'); });
+
+const soundBtn = $('sound');
+const showSound = () => {
+  soundBtn.textContent = Sfx.on ? '🔊' : '🔇';
+  soundBtn.setAttribute('aria-label', Sfx.on ? 'Turn sound off' : 'Turn sound on');
+};
+showSound();
+soundBtn.addEventListener('click', () => { Sfx.start(); Sfx.toggle(); showSound(); });
+$('startBtn').addEventListener('click', startGame);
+$('againBtn').addEventListener('click', startGame);
+
+readTheme();
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', readTheme);
+new MutationObserver(readTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+addEventListener('resize', resize);
+resize();
+hint('');
+r = START_R;
+requestAnimationFrame(frame);
+
+// Install as an app and play offline (only works when served over https or localhost)
+if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+  addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+}
+</script>
+</body>
+</html>

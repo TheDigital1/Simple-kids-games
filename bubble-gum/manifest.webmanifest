@@ -1,0 +1,19 @@
+{
+  "name": "Bubble Gum",
+  "short_name": "Bubble Gum",
+  "description": "Blow a bubble gum bubble just the right size! Hold to blow, let go to stop. Don't let it pop!",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "any",
+  "background_color": "#ffe3f0",
+  "theme_color": "#ffe3f0",
+  "categories": ["kids", "games"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

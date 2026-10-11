@@ -2,7 +2,7 @@
 
 Small, self-contained browser games for kids. Each game is a single HTML file — open it in a browser, no install or build step needed.
 
-**[▶ Play Spark Count now](https://thedigital1.github.io/Simple-kids-games/spark-count/)** · **[▶ Play Bubble Pop now](https://thedigital1.github.io/Simple-kids-games/bubble-pop/)**
+**[▶ Play Spark Count now](https://thedigital1.github.io/Simple-kids-games/spark-count/)** · **[▶ Play Bubble Pop now](https://thedigital1.github.io/Simple-kids-games/bubble-pop/)** · **[▶ Play Bubble Gum now](https://thedigital1.github.io/Simple-kids-games/bubble-gum/)**
 
 ## Games
 
@@ -10,6 +10,7 @@ Small, self-contained browser games for kids. Each game is a single HTML file �
 | --- | --- | --- |
 | Spark Count | [▶ Play now](https://thedigital1.github.io/Simple-kids-games/spark-count/) | Tap the screen to count up: each tap bursts into sparks that gather into the next number, which is read aloud. A frog in a boat floats on the water and can be dragged and tossed for a splash. |
 | Bubble Pop | [▶ Play now](https://thedigital1.github.io/Simple-kids-games/bubble-pop/) | A bunny blows bubbles: first 1, then 4, then 8 — and after that it blows a new one for every pop, so there are always 8 to chase. Pop as many as you can in one minute! Bubbles drift on the breeze, and popping one pushes its neighbors away. |
+| Bubble Gum | [▶ Play now](https://thedigital1.github.io/Simple-kids-games/bubble-gum/) | Hold to blow a bubble gum bubble and let go to stop — each breath starts strong and fades. Get the bubble right up to the circle for 100 points, but go past it and it pops on the boy's face! Five rounds, scored out of 500. |
 
 ## Install as an app
 
