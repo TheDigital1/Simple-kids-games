@@ -1,0 +1,1007 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Build It!</title>
+<meta name="description" content="A little truck brings the parts. Drag them into place to build a car, a digger, a rocket and more!">
+<meta name="theme-color" content="#bfe6ff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1d2452" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Build It!">
+<style>
+  :root {
+    --bg: #bfe6ff;
+    --hud-bg: rgba(255, 255, 255, 0.78);
+    --hud-fg: #213052;
+    --card-bg: #ffffff;
+    --card-fg: #213052;
+    --muted: rgba(33, 48, 82, 0.72);
+    --accent: #ff7a2e;
+    --accent-dark: #c9531a;
+    --mode: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1d2452; --hud-bg: rgba(20, 22, 60, 0.62); --hud-fg: #eef2ff;
+      --card-bg: #262c66; --card-fg: #eef2ff; --muted: rgba(238, 242, 255, 0.75); --mode: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1d2452; --hud-bg: rgba(20, 22, 60, 0.62); --hud-fg: #eef2ff;
+    --card-bg: #262c66; --card-fg: #eef2ff; --muted: rgba(238, 242, 255, 0.75); --mode: dark;
+  }
+  html, body { height: 100%; margin: 0; overflow: hidden; background: var(--bg); }
+  body {
+    font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+    -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+  }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; display: block; }
+  [hidden] { display: none !important; }
+
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0;
+    display: grid; grid-template-columns: 1fr auto 1fr; align-items: start;
+    padding: calc(env(safe-area-inset-top, 0px) + 12px) calc(env(safe-area-inset-right, 0px) + 14px) 0 calc(env(safe-area-inset-left, 0px) + 14px);
+    pointer-events: none;
+  }
+  .pill {
+    background: var(--hud-bg); color: var(--hud-fg);
+    border-radius: 999px; font-weight: 800;
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    box-shadow: 0 2px 10px rgba(20, 30, 70, 0.12);
+  }
+  #level { justify-self: start; display: flex; flex-direction: column; align-items: center; padding: 6px 18px 10px; }
+  #level small { font-size: 12px; letter-spacing: 0.14em; opacity: 0.75; }
+  #levelNum { font-size: 26px; line-height: 1.3; font-variant-numeric: tabular-nums; }
+  #name { padding: 14px 24px; font-size: 26px; line-height: 1; white-space: nowrap; }
+  #name.bump { animation: bump 0.45s ease-out; }
+  @keyframes bump { 40% { transform: scale(1.25); } }
+  #sound {
+    justify-self: end; pointer-events: auto; cursor: pointer; border: 0;
+    font-size: 22px; line-height: 1; padding: 11px 13px;
+  }
+  #sound:focus-visible, .play:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+
+  .overlay {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    padding: 16px; background: rgba(15, 25, 60, 0.25);
+  }
+  .card {
+    background: var(--card-bg); color: var(--card-fg);
+    border-radius: 28px; padding: 28px 22px 30px; width: 100%; max-width: 380px;
+    text-align: center; box-shadow: 0 18px 50px rgba(15, 25, 60, 0.3); box-sizing: border-box;
+  }
+  .card h1, .card h2 { margin: 0 0 10px; font-size: 38px; line-height: 1.1; }
+  .card p { margin: 0; font-size: 18px; line-height: 1.4; color: var(--muted); }
+  .built { font-size: 40px; letter-spacing: 6px; margin: 14px 0 4px; }
+  .play {
+    font: 800 26px/1 "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+    color: #fff; background: var(--accent); border: 0; border-radius: 999px;
+    padding: 18px 44px; margin-top: 22px; cursor: pointer;
+    box-shadow: 0 6px 0 var(--accent-dark);
+  }
+  .play:active { transform: translateY(4px); box-shadow: 0 2px 0 var(--accent-dark); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud">
+  <div id="level" class="pill" aria-label="Build number"><small>BUILD</small><span id="levelNum">1/6</span></div>
+  <div id="name" class="pill" aria-live="polite">Build It!</div>
+  <button id="sound" class="pill" type="button" aria-label="Turn sound off">🔊</button>
+</div>
+
+<div id="startScreen" class="overlay">
+  <div class="card">
+    <h1>Build It!</h1>
+    <p>The little truck brings the parts. Drag each part onto its outline to build something new!</p>
+    <button class="play" id="startBtn" type="button">Let's build ▶</button>
+  </div>
+</div>
+
+<div id="endScreen" class="overlay" hidden>
+  <div class="card">
+    <h2>You built them all!</h2>
+    <div class="built" aria-hidden="true">🚗 🚜 🚒 ✈️ 🚀</div>
+    <p>Great building! Want to build them again?</p>
+    <button class="play" id="againBtn" type="button">Build again ▶</button>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const $ = id => document.getElementById(id);
+const TAU = Math.PI * 2;
+let W, H, dpr, playTop, landscape;
+let bpRect, partsRect;     // where the blueprint goes, where loose parts lie
+
+// =====================================================================
+// Sound effects, made on the fly with the Web Audio API
+// =====================================================================
+const Sfx = (() => {
+  let ac = null, master = null, noiseBuf = null, engGain = null, engOsc = null;
+  let on = true;
+  try { on = localStorage.getItem('buildit-sound') !== 'off'; } catch (e) {}
+
+  function start() {                           // browsers only allow audio after a tap
+    if (ac) { if (ac.state === 'suspended') ac.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    ac = new AC();
+    const comp = ac.createDynamicsCompressor();
+    master = ac.createGain();
+    master.gain.value = on ? 0.6 : 0;
+    master.connect(comp); comp.connect(ac.destination);
+    noiseBuf = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
+    const d = noiseBuf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    // Truck engine: a low buzzy hum whose volume follows how fast the truck moves
+    engOsc = ac.createOscillator(); engOsc.type = 'sawtooth'; engOsc.frequency.value = 52;
+    const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 260;
+    engGain = ac.createGain(); engGain.gain.value = 0;
+    engOsc.connect(lp); lp.connect(engGain); engGain.connect(master);
+    engOsc.start();
+  }
+  const ready = () => ac && on && ac.state === 'running';
+
+  function tone(freq, freqEnd, dur, vol, type = 'sine', delay = 0) {
+    const t = ac.currentTime + delay;
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    if (freqEnd !== freq) o.frequency.exponentialRampToValueAtTime(freqEnd, t + dur);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(master);
+    o.start(t); o.stop(t + dur + 0.05);
+  }
+  function noise(dur, vol, type, f0, f1, delay = 0, q = 1) {
+    const t = ac.currentTime + delay;
+    const src = ac.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+    const f = ac.createBiquadFilter(); f.type = type; f.Q.value = q;
+    f.frequency.setValueAtTime(f0, t);
+    f.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(f); f.connect(g); g.connect(master);
+    src.start(t, Math.random() * 0.5); src.stop(t + dur + 0.05);
+  }
+
+  return {
+    start,
+    get on() { return on; },
+    toggle() {
+      on = !on;
+      try { localStorage.setItem('buildit-sound', on ? 'on' : 'off'); } catch (e) {}
+      if (master) master.gain.setTargetAtTime(on ? 0.6 : 0, ac.currentTime, 0.05);
+      if (!on && window.speechSynthesis) speechSynthesis.cancel();
+      return on;
+    },
+    engine(level) {
+      if (!engGain) return;
+      engGain.gain.setTargetAtTime(on ? level * 0.12 : 0, ac.currentTime, 0.08);
+      engOsc.frequency.setTargetAtTime(48 + level * 30, ac.currentTime, 0.1);
+    },
+    pick() {
+      if (!ready()) return;
+      tone(500, 700, 0.07, 0.1, 'triangle');
+    },
+    clunk() {                                  // part snaps into place
+      if (!ready()) return;
+      tone(150, 70, 0.18, 0.4, 'sine');
+      noise(0.06, 0.3, 'bandpass', 2500, 1200, 0, 2);
+      tone(1800, 1800, 0.12, 0.06, 'triangle', 0.02);
+    },
+    boing() {                                  // wrong spot
+      if (!ready()) return;
+      const t = ac.currentTime;
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(220, t);
+      o.frequency.exponentialRampToValueAtTime(420, t + 0.08);
+      o.frequency.exponentialRampToValueAtTime(180, t + 0.35);
+      const lfo = ac.createOscillator(), lg = ac.createGain();
+      lfo.frequency.value = 18; lg.gain.value = 30;
+      lfo.connect(lg); lg.connect(o.frequency);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.25, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.38);
+      o.connect(g); g.connect(master);
+      o.start(t); o.stop(t + 0.4); lfo.start(t); lfo.stop(t + 0.4);
+    },
+    rattle() {                                 // parts tumbling out of the truck
+      if (!ready()) return;
+      for (let i = 0; i < 9; i++) noise(0.05, 0.18, 'bandpass', 1500 + Math.random() * 2000, 800, i * 0.07 + Math.random() * 0.04, 3);
+      tone(120, 80, 0.3, 0.15, 'sine', 0.35);
+    },
+    honk() {
+      if (!ready()) return;
+      for (const d of [0, 0.22]) { tone(392, 392, 0.17, 0.12, 'square', d); tone(494, 494, 0.17, 0.08, 'square', d); }
+    },
+    whoosh() {
+      if (!ready()) return;
+      noise(0.9, 0.2, 'bandpass', 400, 2500, 0, 1.5);
+    },
+    tada() {
+      if (!ready()) return;
+      [523, 659, 784, 1047].forEach((f, i) => tone(f, f, i === 3 ? 0.5 : 0.16, 0.14, 'triangle', i * 0.1));
+    },
+    fanfare() {
+      if (!ready()) return;
+      [523, 659, 784, 659, 784, 1047].forEach((f, i) => tone(f, f, i === 5 ? 0.7 : 0.18, 0.15, 'triangle', i * 0.12));
+    },
+  };
+})();
+
+const voiceOK = 'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined';
+function say(text) {
+  if (!voiceOK || !Sfx.on) return;
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    const v = speechSynthesis.getVoices().find(v => /^en/i.test(v.lang));
+    if (v) u.voice = v;
+    u.lang = v ? v.lang : 'en-US'; u.rate = 0.95; u.pitch = 1.2;
+    speechSynthesis.speak(u);
+  } catch (e) {}
+}
+
+// =====================================================================
+// Artwork: the little truck and every vehicle part, drawn in "units"
+// =====================================================================
+// <art>
+// Fill and outline a path: real colors, or a dashed see-through "ghost" for the blueprint
+function fs(g, ghost, color) {
+  if (ghost) {
+    g.fillStyle = 'rgba(255, 255, 255, 0.14)'; g.fill();
+    g.setLineDash([9, 7]); g.strokeStyle = 'rgba(255, 255, 255, 0.95)'; g.lineWidth = 3.5; g.stroke(); g.setLineDash([]);
+  } else {
+    g.fillStyle = color; g.fill();
+    g.strokeStyle = shade(color); g.lineWidth = 4; g.stroke();
+  }
+}
+function shade(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  const f = c => Math.round(c * 0.62).toString(16).padStart(2, '0');
+  return '#' + f(n >> 16) + f((n >> 8) & 255) + f(n & 255);
+}
+function rr(g, x, y, w, h, r) {
+  g.beginPath();
+  g.moveTo(x + r, y); g.lineTo(x + w - r, y); g.quadraticCurveTo(x + w, y, x + w, y + r);
+  g.lineTo(x + w, y + h - r); g.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  g.lineTo(x + r, y + h); g.quadraticCurveTo(x, y + h, x, y + h - r);
+  g.lineTo(x, y + r); g.quadraticCurveTo(x, y, x + r, y); g.closePath();
+}
+const poly = (g, pts) => { g.beginPath(); pts.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); };
+const circle = (g, x, y, r) => { g.beginPath(); g.arc(x, y, r, 0, TAU); };
+
+function wheelPart(r, at) {
+  return {
+    type: 'wheel' + r, at, box: [-r - 3, -r - 3, r + 3, r + 3], round: true,
+    draw(g, ghost, spin = 0) {
+      circle(g, 0, 0, r); fs(g, ghost, '#3b3f46');
+      if (ghost) return;
+      circle(g, 0, 0, r * 0.56); g.fillStyle = '#d3d8df'; g.fill();
+      g.fillStyle = '#8a929c';
+      for (let i = 0; i < 5; i++) { const a = spin + i * TAU / 5; circle(g, Math.cos(a) * r * 0.34, Math.sin(a) * r * 0.34, r * 0.08); g.fill(); }
+      circle(g, 0, 0, r * 0.14); g.fill();
+    },
+  };
+}
+
+// Each vehicle: parts with a type, a slot position ("at"), a hit box, and a draw function.
+// Parts of the same type look the same, so they can go in either matching slot.
+const VEHICLES = [
+  { name: 'Car', say: 'A car! Beep beep!', exit: 'drive', eyes: [[18, -48], [42, -48]], parts: [
+    { type: 'carBody', at: [0, 0], box: [-140, -76, 142, 44], draw(g, gh) {
+      g.beginPath();
+      g.moveTo(-135, 40); g.lineTo(-135, -5); g.quadraticCurveTo(-133, -25, -105, -28); g.lineTo(-75, -30);
+      g.lineTo(-45, -72); g.lineTo(45, -72); g.lineTo(80, -30); g.lineTo(115, -26);
+      g.quadraticCurveTo(138, -22, 138, 0); g.lineTo(138, 40); g.closePath();
+      fs(g, gh, '#e8453c');
+      if (gh) return;
+      g.fillStyle = '#bfe6ff';
+      poly(g, [[-66, -32], [-40, -64], [-6, -64], [-6, -32]]); g.fill();
+      poly(g, [[4, -32], [4, -64], [40, -64], [68, -32]]); g.fill();
+      g.fillStyle = '#ffe170'; circle(g, 128, -8, 8); g.fill();
+      g.strokeStyle = 'rgba(0,0,0,0.25)'; g.lineWidth = 3; g.beginPath(); g.moveTo(-1, -30); g.lineTo(-1, 30); g.stroke();
+    } },
+    wheelPart(34, [-80, 40]), wheelPart(34, [80, 40]),
+  ] },
+  { name: 'Digger', say: 'A digger! Dig dig dig!', exit: 'drive', eyes: [[-77, -60], [-55, -60]], parts: [
+    { type: 'tracks', at: [-20, 52], box: [-112, -28, 92, 28], spinParts: true, draw(g, gh, spin = 0) {
+      rr(g, -110, -26, 200, 52, 26); fs(g, gh, '#4a4f57');
+      if (gh) return;
+      for (const x of [-80, -32, 16, 62]) {
+        circle(g, x, 0, 15); g.fillStyle = '#9aa3ad'; g.fill();
+        g.fillStyle = '#5d646d'; circle(g, x + Math.cos(spin) * 7, Math.sin(spin) * 7, 3.5); g.fill();
+      }
+    } },
+    { type: 'diggerCab', at: [-40, -5], box: [-77, -87, 47, 27], draw(g, gh) {
+      g.beginPath();
+      g.moveTo(-75, 25); g.lineTo(-75, -10); g.lineTo(-60, -10); g.lineTo(-60, -75); g.quadraticCurveTo(-60, -85, -50, -85);
+      g.lineTo(0, -85); g.quadraticCurveTo(10, -85, 10, -75); g.lineTo(10, -25); g.lineTo(45, -25); g.lineTo(45, 25); g.closePath();
+      fs(g, gh, '#ffc21a');
+      if (gh) return;
+      rr(g, -50, -75, 50, 46, 7); g.fillStyle = '#bfe6ff'; g.fill();
+      g.fillStyle = '#2b2f36'; rr(g, -75, 4, 120, 8, 3); g.fill();
+    } },
+    { type: 'boom', at: [55, -40], box: [-20, -82, 106, 26], draw(g, gh) {
+      poly(g, [[-18, 8], [4, -12], [68, -80], [92, -70], [104, 20], [86, 24], [78, -46], [10, 12]]);
+      fs(g, gh, '#ffb300');
+      if (gh) return;
+      g.fillStyle = '#6b7280'; circle(g, 80, -66, 7); g.fill(); circle(g, -4, 0, 7); g.fill();
+    } },
+    { type: 'bucket', at: [150, -5], box: [-28, -28, 34, 34], draw(g, gh) {
+      g.beginPath(); g.moveTo(-22, -25); g.lineTo(22, -25); g.quadraticCurveTo(32, 18, -8, 30); g.lineTo(-26, 22); g.closePath();
+      fs(g, gh, '#7b8490');
+      if (gh) return;
+      g.fillStyle = '#5a626c';
+      for (let i = 0; i < 3; i++) { poly(g, [[-22 + i * 6, 24 - i * 2], [-26 + i * 6, 34 - i * 2], [-16 + i * 6, 26 - i * 2]]); g.fill(); }
+    } },
+  ] },
+  { name: 'Tractor', say: 'A tractor! Vroom!', exit: 'drive', eyes: [[-64, -60], [-42, -60]], parts: [
+    { type: 'tractorBody', at: [20, 0], box: [-42, -37, 92, 22], draw(g, gh) {
+      rr(g, -40, -35, 130, 55, 12); fs(g, gh, '#43a047');
+      if (gh) return;
+      g.fillStyle = '#2e7d32'; for (let i = 0; i < 4; i++) { rr(g, 40 + i * 11, -24, 6, 30, 3); g.fill(); }
+      g.fillStyle = '#ffe170'; circle(g, 84, -18, 7); g.fill();
+    } },
+    { type: 'tractorCab', at: [-50, -25], box: [-47, -77, 37, 17], draw(g, gh) {
+      g.beginPath();
+      g.moveTo(-45, 15); g.lineTo(-45, -65); g.quadraticCurveTo(-45, -75, -35, -75); g.lineTo(25, -75);
+      g.quadraticCurveTo(35, -75, 35, -65); g.lineTo(35, 15); g.closePath();
+      fs(g, gh, '#43a047');
+      if (gh) return;
+      rr(g, -33, -63, 56, 48, 6); g.fillStyle = '#bfe6ff'; g.fill();
+      g.fillStyle = '#ffffff'; rr(g, -45, -80, 80, 9, 4); g.fill();
+    } },
+    { ...wheelPart(52, [-58, 30]) },
+    { ...wheelPart(30, [88, 48]) },
+    { type: 'exhaust', at: [64, -60], box: [-9, -34, 9, 26], draw(g, gh) {
+      rr(g, -7, -32, 14, 56, 6); fs(g, gh, '#78808a');
+      if (gh) return;
+      g.fillStyle = '#3d434b'; rr(g, -7, -32, 14, 8, 3); g.fill();
+    } },
+  ] },
+  { name: 'Airplane', say: 'An airplane! Whoosh!', exit: 'fly', eyes: [[96, -12], [116, -10]], parts: [
+    { type: 'fuselage', at: [0, 0], box: [-150, -32, 147, 27], draw(g, gh) {
+      g.beginPath();
+      g.moveTo(-140, -10); g.quadraticCurveTo(-150, -30, -120, -30); g.lineTo(90, -30);
+      g.quadraticCurveTo(140, -28, 145, 0); g.quadraticCurveTo(140, 25, 90, 25); g.lineTo(-110, 20); g.closePath();
+      fs(g, gh, '#4fa3ff');
+      if (gh) return;
+      g.fillStyle = '#ffffff'; rr(g, -120, -4, 200, 8, 4); g.fill();
+      g.fillStyle = '#e6f6ff'; for (let i = 0; i < 4; i++) { circle(g, -60 + i * 34, -14, 8); g.fill(); }
+    } },
+    { type: 'wing', at: [0, 12], box: [-56, -4, 46, 50], draw(g, gh) {
+      poly(g, [[-52, 0], [42, 0], [12, 46], [-44, 46]]); fs(g, gh, '#2f7fe0');
+    } },
+    { type: 'tail', at: [-120, -40], box: [-24, -48, 34, 14], draw(g, gh) {
+      poly(g, [[-22, 12], [-6, -46], [18, -46], [32, 12]]); fs(g, gh, '#ffcf3a');
+    } },
+    { type: 'propeller', at: [152, 0], box: [-14, -46, 14, 46], spinParts: true, draw(g, gh, spin = 0) {
+      const sq = gh ? 1 : Math.cos(spin * 3);
+      g.beginPath(); g.ellipse(0, 0, 9, 44 * Math.max(0.15, Math.abs(sq)), 0, 0, TAU); fs(g, gh, '#5b6470');
+      if (gh) return;
+      circle(g, 0, 0, 10); g.fillStyle = '#ff5f5f'; g.fill();
+    } },
+    { ...wheelPart(20, [30, 52]) },
+  ] },
+  { name: 'Fire truck', say: 'A fire truck! Nee naw nee naw!', exit: 'drive', eyes: [[92, -30], [112, -28]], parts: [
+    { type: 'fireBody', at: [-40, 10], box: [-122, -57, 52, 32], draw(g, gh) {
+      rr(g, -120, -55, 170, 85, 10); fs(g, gh, '#e53935');
+      if (gh) return;
+      g.fillStyle = '#ffffff'; rr(g, -120, -6, 170, 10, 2); g.fill();
+      g.fillStyle = '#b71c1c'; rr(g, -105, -45, 60, 32, 6); g.fill(); rr(g, -35, -45, 60, 32, 6); g.fill();
+    } },
+    { type: 'fireCab', at: [90, 5], box: [-42, -62, 57, 32], draw(g, gh) {
+      g.beginPath(); g.moveTo(-40, 30); g.lineTo(-40, -60); g.lineTo(10, -60); g.lineTo(50, -15); g.lineTo(55, 30); g.closePath();
+      fs(g, gh, '#e53935');
+      if (gh) return;
+      g.fillStyle = '#bfe6ff'; poly(g, [[-28, -48], [5, -48], [35, -15], [-28, -15]]); g.fill();
+      g.fillStyle = '#ffffff'; rr(g, -40, -1, 95, 10, 2); g.fill();
+      g.fillStyle = '#ffe170'; circle(g, 48, 12, 6); g.fill();
+    } },
+    { type: 'ladder', at: [-40, -62], box: [-124, -12, 64, 12], draw(g, gh) {
+      rr(g, -122, -10, 184, 20, 5); fs(g, gh, '#c3cad3');
+      if (gh) return;
+      g.fillStyle = '#8a929c'; for (let x = -110; x < 60; x += 20) { rr(g, x, -6, 6, 12, 2); g.fill(); }
+    } },
+    { type: 'siren', at: [70, -68], box: [-22, -22, 22, 6], draw(g, gh) {
+      g.beginPath(); g.moveTo(-20, 4); g.lineTo(-20, -6); g.quadraticCurveTo(-20, -20, 0, -20); g.quadraticCurveTo(20, -20, 20, -6); g.lineTo(20, 4); g.closePath();
+      fs(g, gh, '#2b8cff');
+      if (gh) return;
+      g.fillStyle = 'rgba(255,255,255,0.6)'; g.beginPath(); g.ellipse(-7, -10, 5, 3, -0.4, 0, TAU); g.fill();
+    } },
+    wheelPart(30, [-110, 45]), wheelPart(30, [85, 45]),
+  ] },
+  { name: 'Rocket', say: 'A rocket! Three, two, one, blast off!', exit: 'rocket', eyes: [[-16, 12], [16, 12]], parts: [
+    { type: 'rocketBody', at: [0, 0], box: [-47, -112, 47, 92], draw(g, gh) {
+      rr(g, -45, -110, 90, 200, 44); fs(g, gh, '#eef1f6');
+      if (gh) return;
+      g.save(); rr(g, -45, -110, 90, 200, 44); g.clip();
+      g.fillStyle = '#ff5f5f'; g.fillRect(-50, 46, 100, 14); g.restore();
+    } },
+    { type: 'nose', at: [0, -128], box: [-47, -64, 47, 28], draw(g, gh) {
+      g.beginPath(); g.moveTo(-44, 26); g.quadraticCurveTo(-34, -30, 0, -62); g.quadraticCurveTo(34, -30, 44, 26); g.closePath();
+      fs(g, gh, '#ff5f5f');
+    } },
+    { type: 'window', at: [0, -50], box: [-31, -31, 31, 31], draw(g, gh) {
+      circle(g, 0, 0, 28); fs(g, gh, '#9aa3ad');
+      if (gh) return;
+      circle(g, 0, 0, 19); g.fillStyle = '#6cc8ff'; g.fill();
+      g.fillStyle = 'rgba(255,255,255,0.7)'; circle(g, -6, -7, 5); g.fill();
+    } },
+    { type: 'finL', at: [-56, 62], box: [-38, -48, 13, 44], draw(g, gh) {
+      poly(g, [[10, -46], [10, 26], [-36, 42], [-30, -4]]); fs(g, gh, '#ff5f5f');
+    } },
+    { type: 'finR', at: [56, 62], box: [-13, -48, 38, 44], draw(g, gh) {
+      poly(g, [[-10, -46], [-10, 26], [36, 42], [30, -4]]); fs(g, gh, '#ff5f5f');
+    } },
+    { type: 'flame', at: [0, 118], box: [-30, -26, 30, 48], draw(g, gh, spin = 0) {
+      const f = gh ? 1 : 1 + Math.sin(spin * 9) * 0.12;
+      g.beginPath(); g.moveTo(-26, -22); g.quadraticCurveTo(-30, 18 * f, 0, 46 * f); g.quadraticCurveTo(30, 18 * f, 26, -22); g.closePath();
+      fs(g, gh, '#ff9a1f');
+      if (gh) return;
+      g.beginPath(); g.moveTo(-13, -20); g.quadraticCurveTo(-14, 8 * f, 0, 26 * f); g.quadraticCurveTo(14, 8 * f, 13, -20); g.closePath();
+      g.fillStyle = '#ffe170'; g.fill();
+    } },
+  ] },
+];
+
+// The little delivery truck, facing right. Origin: middle of the truck at ground level.
+function drawTruck(g, x, y, k, st) {
+  g.save();
+  g.translate(x, y); g.scale(k, k);
+  g.lineJoin = 'round'; g.lineCap = 'round';
+  const outline = (c) => { g.fillStyle = c; g.fill(); g.strokeStyle = shade(c); g.lineWidth = 5; g.stroke(); };
+  rr(g, -128, -64, 256, 26, 8); outline('#5b6470');                  // chassis
+  // Tipper bed, hinged at the back
+  g.save(); g.translate(-122, -64); g.rotate(-st.tip);
+  if (st.loaded) {
+    const blocks = [['#e8453c', 16, -96, 40, 38], ['#ffc21a', 54, -104, 34, 46], ['#4fa3ff', 92, -92, 42, 32], ['#43a047', 30, -84, 30, 24]];
+    for (const [c, bx, by, bw, bh] of blocks) { rr(g, bx, by, bw, bh, 8); outline(c); }
+  }
+  g.beginPath(); g.moveTo(0, 0); g.lineTo(0, -74); g.lineTo(150, -74); g.lineTo(150, -10); g.lineTo(140, 0); g.closePath();
+  outline('#ffc21a');
+  g.strokeStyle = 'rgba(0,0,0,0.18)'; g.lineWidth = 4;
+  for (const bx of [38, 76, 114]) { g.beginPath(); g.moveTo(bx, -66); g.lineTo(bx, -8); g.stroke(); }
+  g.restore();
+  // Cab
+  g.beginPath(); g.moveTo(38, -58); g.lineTo(38, -146); g.quadraticCurveTo(38, -156, 50, -156); g.lineTo(96, -156);
+  g.lineTo(130, -108); g.lineTo(132, -58); g.closePath(); outline('#ff7a2e');
+  poly(g, [[56, -144], [92, -144], [118, -108], [56, -108]]); g.fillStyle = '#d9f1ff'; g.fill();
+  // Eyes in the windshield
+  for (const [ex, ey] of [[72, -126], [98, -124]]) {
+    if (st.blink) { g.strokeStyle = '#26303d'; g.lineWidth = 4; g.beginPath(); g.arc(ex, ey - 2, 9, 0.15 * Math.PI, 0.85 * Math.PI); g.stroke(); continue; }
+    g.beginPath(); g.ellipse(ex, ey, 11, 13, 0, 0, TAU); g.fillStyle = '#ffffff'; g.fill();
+    g.strokeStyle = 'rgba(0,0,0,0.2)'; g.lineWidth = 2; g.stroke();
+    g.beginPath(); g.arc(ex + 3 + (st.look || 0) * 3, ey + 2, 6, 0, TAU); g.fillStyle = '#26303d'; g.fill();
+    g.beginPath(); g.arc(ex + 1, ey - 1, 2, 0, TAU); g.fillStyle = '#ffffff'; g.fill();
+  }
+  g.strokeStyle = '#a8401a'; g.lineWidth = 5;                          // smile on the grille
+  g.beginPath(); g.arc(112, -92, 13, 0.2 * Math.PI, 0.8 * Math.PI); g.stroke();
+  g.fillStyle = '#ffe170'; g.beginPath(); g.arc(128, -78, 7, 0, TAU); g.fill();
+  // Wheels
+  for (const wx of [-80, 82]) {
+    g.save(); g.translate(wx, -28); wheelPart(28).draw(g, false, st.spin || 0); g.restore();
+  }
+  g.restore();
+}
+
+function drawEyes(g, eyes, open, look) {
+  for (const [ex, ey] of eyes) {
+    if (open < 0.5) {
+      g.strokeStyle = '#26303d'; g.lineWidth = 4;
+      g.beginPath(); g.arc(ex, ey - 2, 8, 0.15 * Math.PI, 0.85 * Math.PI); g.stroke();
+      continue;
+    }
+    g.beginPath(); g.ellipse(ex, ey, 10, 12 * open, 0, 0, TAU); g.fillStyle = '#ffffff'; g.fill();
+    g.strokeStyle = 'rgba(0,0,0,0.25)'; g.lineWidth = 2; g.stroke();
+    g.beginPath(); g.arc(ex + 2 + look * 2, ey + 2, 5.5 * open, 0, TAU); g.fillStyle = '#26303d'; g.fill();
+    g.beginPath(); g.arc(ex, ey - 1, 1.8, 0, TAU); g.fillStyle = '#ffffff'; g.fill();
+  }
+}
+// </art>
+
+// =====================================================================
+// Layout
+// =====================================================================
+let dark = false;
+function readTheme() {
+  dark = getComputedStyle(document.documentElement).getPropertyValue('--mode').trim() === 'dark';
+}
+
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight;
+  canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+  playTop = $('hud').getBoundingClientRect().bottom + 8;
+  landscape = W > H * 1.2;
+  const m = 12;
+  if (landscape) {
+    bpRect = { x: m, y: playTop, w: W * 0.56 - m * 1.5, h: H - playTop - m };
+    partsRect = { x: W * 0.56 + m * 0.5, y: playTop, w: W * 0.44 - m * 1.5, h: H - playTop - m };
+  } else {
+    const split = playTop + (H - playTop) * 0.5;
+    bpRect = { x: m, y: playTop, w: W - m * 2, h: split - playTop - m / 2 };
+    partsRect = { x: m, y: split + m / 2, w: W - m * 2, h: H - split - m };
+  }
+  if (level) layoutLevel(false);
+}
+
+// =====================================================================
+// Game state
+// =====================================================================
+let phase = 'intro';       // intro | arrive | dump | build | done | exit | over
+let phaseT = 0;
+let levelIndex = 0, level = null;
+let parts = [], slots = [], scale = 1, vbox = null, vcx = 0, vcy = 0;
+let trayK = 1;             // loose parts are shown this much smaller so they fit the tray
+let drag = null, idleT = 0;
+const truck = { x: -400, k: 1, tip: 0, loaded: true, spin: 0, blinkIn: 2, blink: 0, v: 0 };
+const vehicleFx = { ox: 0, oy: 0, rot: 0, v: 0, eyes: 0, spin: 0, bounce: 0 };
+const fx = [];             // sparkles, smoke puffs
+
+function bboxOf(def) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const p of def.parts) {
+    x0 = Math.min(x0, p.at[0] + p.box[0]); y0 = Math.min(y0, p.at[1] + p.box[1]);
+    x1 = Math.max(x1, p.at[0] + p.box[2]); y1 = Math.max(y1, p.at[1] + p.box[3]);
+  }
+  return { x0, y0, x1, y1, w: x1 - x0, h: y1 - y0 };
+}
+const slotX = s => bpCenter().x + (s.at[0] - vcx) * scale;
+const slotY = s => bpCenter().y + (s.at[1] - vcy) * scale;
+const bpCenter = () => ({ x: bpRect.x + bpRect.w / 2, y: bpRect.y + bpRect.h / 2 });
+
+// Lay the loose parts out in rows inside the parts area. Returns false if they don't fit.
+function packParts(list, s) {
+  const gap = 18, rows = [];
+  let row = [], rowW = 0;
+  for (const p of list) {
+    // A little extra room because loose parts lie slightly tilted
+    const w = (p.def.box[2] - p.def.box[0]) * s * 1.12, h = (p.def.box[3] - p.def.box[1]) * s * 1.12;
+    if (w > partsRect.w) return false;
+    if (row.length && rowW + gap + w > partsRect.w) { rows.push(row); row = []; rowW = 0; }
+    row.push({ p, w, h }); rowW += (row.length > 1 ? gap : 0) + w;
+  }
+  if (row.length) rows.push(row);
+  const totalH = rows.reduce((a, r) => a + Math.max(...r.map(i => i.h)), 0) + gap * (rows.length - 1);
+  if (totalH > partsRect.h) return false;
+  let y = partsRect.y + (partsRect.h - totalH) / 2;
+  for (const r of rows) {
+    const rh = Math.max(...r.map(i => i.h));
+    const rw = r.reduce((a, i) => a + i.w, 0) + gap * (r.length - 1);
+    let x = partsRect.x + (partsRect.w - rw) / 2;
+    for (const { p, w, h } of r) {
+      // Home position is the part's origin, so offset from its box corner
+      p.home = { x: x + w / 2 - (p.def.box[0] + p.def.box[2]) / 2 * s, y: y + rh / 2 - (p.def.box[1] + p.def.box[3]) / 2 * s };
+      x += w + gap;
+    }
+    y += rh + gap;
+  }
+  return true;
+}
+
+function layoutLevel(fresh) {
+  vbox = bboxOf(level);
+  vcx = (vbox.x0 + vbox.x1) / 2; vcy = (vbox.y0 + vbox.y1) / 2;
+  scale = Math.min(bpRect.w * 0.86 / vbox.w, bpRect.h * 0.82 / vbox.h, 2.2);
+  const loose = parts.filter(p => !p.placed);
+  if (fresh) for (let i = loose.length - 1; i > 0; i--) { const j = Math.random() * (i + 1) | 0; [loose[i], loose[j]] = [loose[j], loose[i]]; }
+  // The blueprint keeps its size; loose parts shrink until they all fit in the tray
+  const order = fresh ? loose : loose.slice().sort((a, b) => a.order - b.order);
+  trayK = 1;
+  while (!packParts(order, scale * trayK) && trayK > 0.35) trayK *= 0.92;
+  loose.forEach((p, i) => { if (fresh) p.order = i; });
+  for (const p of parts) {
+    if (p.placed) { p.x = slotX(slots[p.slot]); p.y = slotY(slots[p.slot]); }
+    else if (!p.anim && p !== drag?.part) { p.x = p.home.x; p.y = p.home.y; p.sc = trayK; }
+  }
+  truck.k = truckScale();
+}
+// Truck size: about 40% of the width, but never taller than ~30% of the screen
+const truckScale = () => Math.max(0.4, Math.min(1.1, Math.min(W * 0.42, 300) / 270, H * 0.3 / 160));
+
+function startLevel(i) {
+  levelIndex = i; level = VEHICLES[i];
+  slots = level.parts.map(d => ({ type: d.type, at: d.at, filled: false }));
+  parts = level.parts.map((d, k) => ({ def: d, type: d.type, placed: false, slot: -1, x: 0, y: 0, rot: 0, sc: 1,
+                                       anim: null, home: null, order: k, ready: false, wiggle: 0 }));
+  layoutLevel(true);
+  for (const p of parts) p.rot = (Math.random() - 0.5) * (0.3 + levelIndex * 0.08);
+  Object.assign(vehicleFx, { ox: 0, oy: 0, rot: 0, v: 0, eyes: 0, spin: 0, bounce: 0 });
+  truck.x = -truck.k * 160; truck.tip = 0; truck.loaded = true; truck.v = 0;
+  phase = 'arrive'; phaseT = 0; idleT = 0;
+  $('levelNum').textContent = `${i + 1}/${VEHICLES.length}`;
+  const what = `${/^[aeiou]/i.test(level.name) ? 'an' : 'a'} ${level.name.toLowerCase()}`;
+  $('name').textContent = `Build ${what}!`;
+  fitName();
+  say(`Let's build ${what}!`);
+}
+
+// Keep the title pill from crowding the side pills on narrow screens
+function fitName() {
+  const el = $('name');
+  el.style.fontSize = '';
+  const max = W - 2 * Math.max($('level').offsetWidth, $('sound').offsetWidth) - 48;
+  for (let fsz = 26; fsz > 14 && el.offsetWidth > max; fsz -= 2) el.style.fontSize = fsz + 'px';
+}
+
+function startGame() {
+  Sfx.start();
+  $('startScreen').hidden = true; $('endScreen').hidden = true;
+  startLevel(0);
+}
+
+// =====================================================================
+// Update
+// =====================================================================
+const ease = t => 1 - Math.pow(1 - t, 3);
+
+function update(dt, t) {
+  phaseT += dt;
+  const truckStop = landscape ? partsRect.x + partsRect.w * 0.35 : W * 0.32;
+  const truckY = H - 6;
+
+  if (phase === 'arrive') {
+    const a = Math.min(1, phaseT / 1.4);
+    const nx = -truck.k * 160 + (truckStop + truck.k * 160) * ease(a);
+    truck.v = (nx - truck.x) / dt; truck.x = nx;
+    if (a >= 1) { phase = 'dump'; phaseT = 0; truck.v = 0; }
+  } else if (phase === 'dump') {
+    truck.tip = phaseT < 0.5 ? ease(phaseT / 0.5) * 0.7 : phaseT < 1.3 ? 0.7 : Math.max(0, 0.7 - (phaseT - 1.3) * 1.4);
+    if (phaseT >= 0.45 && truck.loaded) {
+      truck.loaded = false;
+      Sfx.rattle();
+      // Parts tumble out of the bed and fly to their spots
+      const bedX = truck.x - 40 * truck.k, bedY = truckY - 150 * truck.k;
+      parts.forEach((p, i) => {
+        p.anim = { fx: bedX + (Math.random() - 0.5) * 40, fy: bedY, frot: (Math.random() - 0.5) * 3, fsc: 0.3,
+                   tx: p.home.x, ty: p.home.y, trot: p.rot, tsc: trayK, t: -i * 0.09, dur: 0.75, arc: 120 + Math.random() * 60 };
+        p.x = p.anim.fx; p.y = p.anim.fy; p.sc = 0.3;
+      });
+    }
+    if (phaseT > 1.9) { phase = 'build'; phaseT = 0; }
+  }
+  // The truck drives away once it has dropped everything off
+  if (phase === 'build' || phase === 'done' || phase === 'exit') {
+    if (truck.x < W + truck.k * 200) {
+      truck.v = Math.min(700, truck.v + 600 * dt);
+      truck.x += truck.v * dt;
+    } else truck.v = 0;                        // gone: engine goes quiet
+  }
+  truck.spin += (truck.v * dt) / (28 * truck.k);
+  Sfx.engine(Math.min(1, Math.abs(truck.v) / 500) + (phase === 'arrive' || phase === 'dump' ? 0.25 : 0) * (truck.x < W ? 1 : 0));
+  truck.blinkIn -= dt; truck.blink -= dt;
+  if (truck.blinkIn <= 0) { truck.blink = 0.13; truck.blinkIn = 2 + Math.random() * 3; }
+
+  // Part animations: flying out of the truck, snapping in, sliding home
+  for (const p of parts) {
+    if (p.anim) {
+      const a = p.anim; a.t += dt;
+      const k = Math.max(0, Math.min(1, a.t / a.dur)), e = ease(k);
+      p.x = a.fx + (a.tx - a.fx) * e;
+      p.y = a.fy + (a.ty - a.fy) * e - (a.arc || 0) * Math.sin(Math.PI * k);
+      p.rot = a.frot + (a.trot - a.frot) * e;
+      p.sc = a.fsc + (a.tsc - a.fsc) * e;
+      if (k >= 1) { p.anim = null; p.ready = true; if (a.done) a.done(); }
+    }
+    p.wiggle *= Math.exp(-6 * dt);
+  }
+
+  if (phase === 'build') {
+    idleT += dt;
+    if (slots.every(s => s.filled) && parts.every(p => !p.anim)) {
+      phase = 'done'; phaseT = 0;
+      Sfx.tada();
+      burst(bpCenter().x, bpCenter().y, 40);
+      $('name').textContent = `${level.name}!`; fitName();
+      const n = $('name'); n.classList.remove('bump'); void n.offsetWidth; n.classList.add('bump');
+    }
+  } else if (phase === 'done') {
+    vehicleFx.eyes = Math.min(1, phaseT / 0.35);
+    vehicleFx.bounce = Math.sin(phaseT * 14) * Math.max(0, 1 - phaseT / 0.8) * 0.06;
+    if (phaseT > 0.4 && phaseT - dt <= 0.4) { Sfx.honk(); say(level.say); }
+    if (phaseT > 1.8) { phase = 'exit'; phaseT = 0; if (level.exit !== 'drive') Sfx.whoosh(); }
+  } else if (phase === 'exit') {
+    const fv = vehicleFx;
+    fv.v += 900 * dt;
+    if (level.exit === 'drive') { fv.ox += fv.v * dt; fv.spin += fv.v * dt / 30; Sfx.engine(Math.min(1, fv.v / 900)); }
+    else if (level.exit === 'fly') { fv.ox += fv.v * dt; fv.oy -= fv.v * 0.45 * dt; fv.rot = -0.22; fv.spin += dt * 30; }
+    else { fv.oy -= fv.v * dt * 1.2; fv.spin += dt * 20; puff(slotX({ at: [0, 150] }) + fv.ox, slotY({ at: [0, 150] }) + fv.oy); }
+    if (level.exit === 'drive' && Math.random() < 0.4) puff(slotX({ at: [vbox.x0, vbox.y1 - 10] }) + fv.ox, slotY({ at: [vbox.x0, vbox.y1 - 10] }));
+    const gone = fv.ox - vbox.w * scale > W || fv.oy + vbox.h * scale < -40 - bpCenter().y;
+    if (gone || phaseT > 4) {
+      if (levelIndex + 1 < VEHICLES.length) startLevel(levelIndex + 1);
+      else {
+        phase = 'over'; Sfx.fanfare(); Sfx.engine(0); say('You built them all!');
+        $('name').textContent = 'All built!'; fitName();
+        setTimeout(() => { $('endScreen').hidden = false; $('againBtn').focus({ preventScroll: true }); }, 400);
+      }
+    }
+  }
+
+  for (let i = fx.length - 1; i >= 0; i--) {
+    const f = fx[i];
+    f.life -= dt * (f.kind === 'puff' ? 1.4 : 1.1);
+    f.vy += (f.kind === 'puff' ? -30 : 400) * dt;
+    f.x += f.vx * dt; f.y += f.vy * dt;
+    if (f.life <= 0) fx.splice(i, 1);
+  }
+}
+
+function burst(x, y, n) {
+  const colors = ['#ffcf3a', '#ff5f8f', '#4fa3ff', '#43d17a', '#ff7a2e'];
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * TAU, s = 150 + Math.random() * 380;
+    fx.push({ kind: 'star', x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 200, life: 1, r: 5 + Math.random() * 6, c: colors[i % colors.length], rot: Math.random() * TAU });
+  }
+}
+function puff(x, y) {
+  if (fx.length > 160) return;
+  fx.push({ kind: 'puff', x, y, vx: (Math.random() - 0.5) * 60, vy: 40 + Math.random() * 40, life: 1, r: 8 + Math.random() * 10 });
+}
+
+// =====================================================================
+// Drawing
+// =====================================================================
+function drawBackground() {
+  const sky = ctx.createLinearGradient(0, 0, 0, H);
+  if (dark) { sky.addColorStop(0, '#1d2452'); sky.addColorStop(1, '#3d3a72'); }
+  else      { sky.addColorStop(0, '#a8dcff'); sky.addColorStop(1, '#eaf6ff'); }
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+  // Ground strip where the truck drives
+  const gy = H - 6;
+  ctx.fillStyle = dark ? '#3a3f55' : '#c9b48a';
+  ctx.fillRect(0, gy - 4, W, H - gy + 4);
+  ctx.fillStyle = dark ? '#2a2f44' : '#a99267';
+  ctx.fillRect(0, gy - 6, W, 3);
+  // Parts area: a soft "ground" mat
+  ctx.fillStyle = dark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.45)';
+  rr(ctx, partsRect.x, partsRect.y, partsRect.w, partsRect.h, 22); ctx.fill();
+}
+
+function drawBlueprint(t) {
+  if (!level || phase === 'over') return;
+  const pad = 16;
+  const c = bpCenter();
+  const w = Math.min(bpRect.w, vbox.w * scale + pad * 2 + 20), h = Math.min(bpRect.h, vbox.h * scale + pad * 2 + 20);
+  const x = c.x - w / 2, y = c.y - h / 2;
+  ctx.save();
+  rr(ctx, x, y, w, h, 20);
+  ctx.fillStyle = dark ? '#24489a' : '#2f6fd6'; ctx.fill();
+  ctx.clip();
+  ctx.strokeStyle = 'rgba(255,255,255,0.13)'; ctx.lineWidth = 1;
+  for (let gx = x + 12; gx < x + w; gx += 22) { ctx.beginPath(); ctx.moveTo(gx, y); ctx.lineTo(gx, y + h); ctx.stroke(); }
+  for (let gy = y + 12; gy < y + h; gy += 22) { ctx.beginPath(); ctx.moveTo(x, gy); ctx.lineTo(x + w, gy); ctx.stroke(); }
+  ctx.restore();
+  // Empty slots as dashed outlines; glow the one a part is hovering over
+  for (let i = 0; i < slots.length; i++) {
+    const s = slots[i];
+    if (s.filled) continue;
+    const def = level.parts[i];
+    ctx.save();
+    ctx.translate(slotX(s), slotY(s)); ctx.scale(scale, scale);
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    def.draw(ctx, true);
+    if (drag && drag.target === i) {
+      ctx.globalAlpha = 0.35 + 0.2 * Math.sin(t * 10);
+      def.draw(ctx, false);
+    }
+    ctx.restore();
+  }
+}
+
+function drawPart(p, spin = 0, dx = 0, dy = 0, extraRot = 0) {
+  ctx.save();
+  ctx.translate(p.x + dx, p.y + dy);
+  ctx.rotate(p.rot + extraRot + Math.sin(p.wiggle * 40) * p.wiggle * 0.3);
+  ctx.scale(scale * p.sc, scale * p.sc);
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  p.def.draw(ctx, false, spin);
+  ctx.restore();
+}
+
+function drawVehicle(t) {
+  const fv = vehicleFx;
+  const placed = parts.filter(p => p.placed);
+  if (!placed.length) return;
+  const c = bpCenter();
+  ctx.save();
+  ctx.translate(c.x + fv.ox, c.y + fv.oy);
+  ctx.rotate(fv.rot);
+  ctx.scale(1 + fv.bounce, 1 - fv.bounce);
+  ctx.translate(-c.x, -c.y);
+  // Wheels and tracks spin while driving; flames flicker; propellers turn
+  const alive = phase === 'done' || phase === 'exit';
+  for (const p of placed) {
+    const spin = p.type === 'flame' ? t
+               : p.type === 'propeller' ? (alive ? t * 3 : 0)
+               : phase === 'exit' ? fv.spin : 0;
+    drawPart(p, spin);
+  }
+  if (fv.eyes > 0) {
+    ctx.save();
+    ctx.translate(c.x - vcx * scale, c.y - vcy * scale); ctx.scale(scale, scale);
+    const blink = (t % 3.2) < 0.12;
+    drawEyes(ctx, level.eyes, blink ? 0 : fv.eyes, 1);
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+// After a while with nothing happening, a hand shows where a part goes
+function drawHint(t) {
+  if (phase !== 'build' || drag || idleT < 6) return;
+  const p = parts.find(q => !q.placed && q.ready);
+  if (!p) return;
+  const si = slots.findIndex(s => !s.filled && s.type === p.type);
+  if (si < 0) return;
+  const k = ((idleT - 6) % 2.2) / 2.2;
+  const m = k < 0.15 ? 0 : k > 0.75 ? 1 : ease((k - 0.15) / 0.6);
+  const hx = p.x + (slotX(slots[si]) - p.x) * m, hy = p.y + (slotY(slots[si]) - p.y) * m;
+  ctx.save();
+  ctx.globalAlpha = k > 0.9 ? (1 - k) * 10 : 1;
+  ctx.strokeStyle = 'rgba(255, 220, 80, 0.9)'; ctx.lineWidth = 4; ctx.setLineDash([6, 8]);
+  ctx.beginPath(); ctx.arc(p.x, p.y, 34 + 4 * Math.sin(t * 8), 0, TAU); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.font = '44px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.fillText('👆', hx + 6, hy - 4);
+  ctx.restore();
+}
+
+function drawFx() {
+  for (const f of fx) {
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, f.life);
+    ctx.translate(f.x, f.y);
+    if (f.kind === 'puff') {
+      ctx.fillStyle = dark ? 'rgba(220,220,240,0.5)' : 'rgba(255,255,255,0.8)';
+      ctx.beginPath(); ctx.arc(0, 0, f.r * (2 - f.life), 0, TAU); ctx.fill();
+    } else {
+      ctx.rotate(f.rot + (1 - f.life) * 4);
+      ctx.fillStyle = f.c;
+      ctx.beginPath();
+      for (let i = 0; i < 10; i++) { const a = i * Math.PI / 5, rr2 = i % 2 ? f.r * 0.45 : f.r; ctx.lineTo(Math.cos(a) * rr2, Math.sin(a) * rr2); }
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+let last = performance.now();
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min((now - last) / 1000, 0.05);
+  last = now;
+  const t = now / 1000;
+  if (phase !== 'intro') update(dt, t);
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  drawBackground();
+  drawBlueprint(t);
+  drawVehicle(t);
+  drawTruck(ctx, truck.x, H - 6, truck.k, { tip: truck.tip, loaded: truck.loaded, spin: truck.spin, blink: truck.blink > 0, look: 0 });
+  for (const p of parts) if (!p.placed && p !== drag?.part) drawPart(p);
+  if (drag) {
+    ctx.save(); ctx.globalAlpha = 0.25; ctx.fillStyle = '#000';
+    ctx.beginPath(); ctx.ellipse(drag.part.x + 6, drag.part.y + 14, 30 * drag.part.sc, 10, 0, 0, TAU); ctx.fill(); ctx.restore();
+    drawPart(drag.part);
+  }
+  drawFx();
+  drawHint(t);
+}
+
+// =====================================================================
+// Input: drag parts onto the blueprint
+// =====================================================================
+function partAt(x, y) {
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i];
+    if (p.placed || !p.ready || p.anim) continue;
+    const dx = x - p.x, dy = y - p.y, c = Math.cos(-p.rot), s = Math.sin(-p.rot);
+    const k = scale * p.sc;
+    const lx = (dx * c - dy * s) / k, ly = (dx * s + dy * c) / k;
+    const pad = 16 / k, b = p.def.box;
+    if (lx > b[0] - pad && lx < b[2] + pad && ly > b[1] - pad && ly < b[3] + pad) return p;
+  }
+  return null;
+}
+// The open slot this part would snap into, if it's close enough
+function snapTarget(p) {
+  const size = Math.max(p.def.box[2] - p.def.box[0], p.def.box[3] - p.def.box[1]) * scale;
+  const reach = Math.max(46, size * 0.45);
+  let best = -1, bestD = reach;
+  slots.forEach((s, i) => {
+    if (s.filled || s.type !== p.type) return;
+    const d = Math.hypot(p.x - slotX(s), p.y - slotY(s));
+    if (d < bestD) { bestD = d; best = i; }
+  });
+  return best;
+}
+const inBlueprint = (x, y) => x > bpRect.x && x < bpRect.x + bpRect.w && y > bpRect.y && y < bpRect.y + bpRect.h;
+
+canvas.addEventListener('pointerdown', e => {
+  Sfx.start();
+  if (phase !== 'build' && phase !== 'dump') return;
+  if (drag) return;
+  const p = partAt(e.clientX, e.clientY);
+  if (!p) return;
+  idleT = 0;
+  // Picked-up parts grow to full size (matching the outline), keeping the same spot under the finger
+  const grow = 1.04 / p.sc;
+  drag = { part: p, id: e.pointerId, ox: (p.x - e.clientX) * grow, oy: (p.y - e.clientY) * grow, target: -1 };
+  parts.splice(parts.indexOf(p), 1); parts.push(p);           // bring to front
+  p.sc = 1.04; p.x = e.clientX + drag.ox; p.y = e.clientY + drag.oy;
+  try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+  Sfx.pick();
+});
+canvas.addEventListener('pointermove', e => {
+  if (!drag || e.pointerId !== drag.id) return;
+  const p = drag.part;
+  p.x = e.clientX + drag.ox; p.y = e.clientY + drag.oy;
+  p.rot *= 0.9;                                               // straightens out while carried
+  drag.target = snapTarget(p);
+});
+function drop(e) {
+  if (!drag || e.pointerId !== drag.id) return;
+  const p = drag.part, target = snapTarget(p);
+  drag = null; idleT = 0;
+  if (target >= 0) {
+    slots[target].filled = true;
+    p.placed = true; p.slot = target;
+    p.anim = { fx: p.x, fy: p.y, frot: p.rot, fsc: p.sc, tx: slotX(slots[target]), ty: slotY(slots[target]), trot: 0, tsc: 1,
+               t: 0, dur: 0.18, arc: 0, done: () => { Sfx.clunk(); burst(p.x, p.y, 8); } };
+  } else if (inBlueprint(e.clientX, e.clientY)) {
+    // Wrong spot: boing, and it slides back to where it was
+    Sfx.boing(); p.wiggle = 1;
+    p.anim = { fx: p.x, fy: p.y, frot: p.rot, fsc: p.sc, tx: p.home.x, ty: p.home.y, trot: p.rot, tsc: trayK, t: -0.25, dur: 0.45, arc: 40 };
+  } else {
+    // Dropped somewhere else on the ground: it stays there
+    p.home = { x: Math.max(20, Math.min(W - 20, p.x)), y: Math.max(playTop + 20, Math.min(H - 20, p.y)) };
+    p.anim = { fx: p.x, fy: p.y, frot: p.rot, fsc: p.sc, tx: p.home.x, ty: p.home.y, trot: p.rot, tsc: trayK, t: 0, dur: 0.12, arc: 0 };
+  }
+}
+canvas.addEventListener('pointerup', drop);
+canvas.addEventListener('pointercancel', drop);
+
+const soundBtn = $('sound');
+const showSound = () => {
+  soundBtn.textContent = Sfx.on ? '🔊' : '🔇';
+  soundBtn.setAttribute('aria-label', Sfx.on ? 'Turn sound off' : 'Turn sound on');
+};
+showSound();
+soundBtn.addEventListener('click', () => { Sfx.start(); Sfx.toggle(); showSound(); });
+$('startBtn').addEventListener('click', startGame);
+$('againBtn').addEventListener('click', startGame);
+
+readTheme();
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', readTheme);
+new MutationObserver(readTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+addEventListener('resize', () => { resize(); fitName(); });
+resize();
+truck.x = W * 0.3; truck.k = truckScale();
+requestAnimationFrame(frame);
+
+// Install as an app and play offline (only works when served over https or localhost)
+if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+  addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+}
+</script>
+</body>
+</html>
