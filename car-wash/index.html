@@ -118,9 +118,10 @@
     border-radius: 28px; padding: 28px 22px 30px; width: 100%; max-width: 380px;
     text-align: center; box-shadow: 0 18px 50px rgba(15, 30, 60, 0.3); box-sizing: border-box;
   }
-  .card h1 { margin: 0 0 10px; font-size: 38px; line-height: 1.1; }
+  .card h1, .card h2 { margin: 0 0 10px; font-size: 38px; line-height: 1.1; }
   .card p { margin: 0; font-size: 18px; line-height: 1.4; color: var(--muted); }
-  .steps { font-size: 34px; letter-spacing: 8px; margin: 14px 0 0; }
+  .steps { font-size: 30px; letter-spacing: 4px; margin: 14px 0 0; white-space: nowrap; }
+  #endScreen .steps { margin-bottom: 10px; }
   .play {
     font: 800 26px/1 "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
     color: #fff; background: var(--accent); border: 0; border-radius: 999px;
@@ -134,7 +135,7 @@
 <canvas id="c"></canvas>
 
 <div id="hud">
-  <div id="count" class="pill" aria-label="Vehicles washed"><small>WASHED</small><span id="countNum">0</span></div>
+  <div id="count" class="pill" aria-label="Vehicles washed"><small>WASHED</small><span id="countNum">0/6</span></div>
   <div id="step" class="pill" aria-live="polite">Car Wash</div>
   <button id="sound" class="pill" type="button" aria-label="Turn sound off">🔊</button>
 </div>
@@ -151,6 +152,15 @@
     <p>Muddy vehicles need your help! Rub them with your finger to scrub, rinse and shine.</p>
     <div class="steps" aria-hidden="true">🧽 🚿 ✨</div>
     <button class="play" id="startBtn" type="button">Let's wash ▶</button>
+  </div>
+</div>
+
+<div id="endScreen" class="overlay" hidden>
+  <div class="card">
+    <h2>All clean!</h2>
+    <div class="steps" aria-hidden="true">🚗 🚜 🚒 ✈️ 🚀</div>
+    <p>You washed every vehicle. They're all sparkling! Want to wash them again?</p>
+    <button class="play" id="againBtn" type="button">Wash again ▶</button>
   </div>
 </div>
 
@@ -627,7 +637,7 @@ const STEPS = [
   { tool: '🚿', title: 'Rinse the soap!', layer: 'foam' },
   { tool: '✨', title: 'Wipe it shiny!', layer: 'drops' },
 ];
-let phase = 'intro';       // intro | arrive | wash | clean | leave
+let phase = 'intro';       // intro | arrive | wash | clean | leave | over
 let phaseT = 0, step = 0, startCover = 1, progress = 0, washed = 0, order = [], orderI = 0;
 let ox = 0, spin = 0, carV = 0, bounce = 0, glintT = -1, blinkIn = 2, blinkT = 0, mood = 0;
 let pointer = null;        // { x, y, down }
@@ -644,7 +654,7 @@ function showStep() {
   STEPS.forEach((s, i) => {
     const el = $('tool' + i);
     el.classList.toggle('on', phase === 'wash' && i === step);
-    el.classList.toggle('done', i < step || phase === 'clean' || phase === 'leave');
+    el.classList.toggle('done', i < step || phase === 'clean' || phase === 'leave' || phase === 'over');
     el.style.setProperty('--p', i === step && phase === 'wash' ? progress : 0);
   });
 }
@@ -670,9 +680,19 @@ function nextVehicle() {
 function startGame() {
   Sfx.start();
   $('startScreen').hidden = true;
-  washed = 0; $('countNum').textContent = '0';
+  $('endScreen').hidden = true;
+  washed = 0; $('countNum').textContent = `0/${VEHICLES.length}`;
   order = []; orderI = 0;
   nextVehicle();
+}
+
+// Every vehicle is clean: show the finish card
+function finishGame() {
+  phase = 'over'; veh = null;
+  $('step').textContent = 'All clean!'; fitStep();
+  showStep();
+  Sfx.sparkle(); say('All clean! Great washing!');
+  setTimeout(() => { $('endScreen').hidden = false; $('againBtn').focus({ preventScroll: true }); }, 400);
 }
 
 function beginStep(i) {
@@ -698,7 +718,7 @@ function finishStep() {
     dropsCtx.clearRect(0, 0, drops.width, drops.height);
     phase = 'clean'; phaseT = 0; glintT = 0;
     washed++;
-    const el = $('countNum'); el.textContent = washed;
+    const el = $('countNum'); el.textContent = `${washed}/${VEHICLES.length}`;
     el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump');
     $('step').textContent = 'Sparkling clean!'; fitStep();
     showStep();
@@ -721,9 +741,12 @@ function paintDrops() {
   keepOnVehicle(c);
 }
 
+// Brush size follows the vehicle's bigger side, so tall ones (the rocket) get a big enough brush too
+const brushR = () => Math.max(24, Math.min(48, Math.max(box.w, box.h) * 0.075));
+
 // Rub along a line from the last finger position, with the current tool
 function stroke(x0, y0, x1, y1) {
-  const r = Math.max(22, Math.min(46, box.w * 0.075)) * MR;
+  const r = brushR() * MR;
   const ax = (x0 - box.x - ox) * MR, ay = (y0 - box.y) * MR, bx = (x1 - box.x - ox) * MR, by = (y1 - box.y) * MR;
   const len = Math.hypot(bx - ax, by - ay), n = Math.max(1, Math.ceil(len / (r * 0.4)));
   const erase = step === 0 ? mudCtx : step === 1 ? foamCtx : dropsCtx;
@@ -766,7 +789,11 @@ function update(dt, t) {
   } else if (phase === 'leave') {
     carV += 900 * dt; ox += carV * dt; spin += carV * dt / 34;
     Sfx.engine(Math.min(1, carV / 900));
-    if (box.x + ox > W + 20) { Sfx.engine(0); nextVehicle(); }
+    if (box.x + ox > W + 20) {
+      Sfx.engine(0);
+      if (washed < VEHICLES.length) nextVehicle();
+      else finishGame();
+    }
   }
 
   // Washing: how fast the finger moves drives the sounds
@@ -787,7 +814,7 @@ function update(dt, t) {
       const layer = { mud: [mud, mudCtx], foam: [foam, foamCtx], drops: [drops, dropsCtx] }[STEPS[step].layer];
       progress = Math.min(1, 1 - coverage(...layer) / startCover);
       showStep();
-      if (progress >= 0.94) finishStep();
+      if (progress >= 0.9) finishStep();
     }
   }
   // Happier the cleaner it gets
@@ -828,10 +855,8 @@ function drawBay() {
   const tile = 46;
   for (let y = 0; y < H; y += tile) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
   for (let x = 0; x < W; x += tile) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
-  // Blue stripe and floor
+  // Floor
   const floorY = box.y + box.h - 4;
-  ctx.fillStyle = dark ? '#1a6fb8' : '#4fb3ff';
-  ctx.fillRect(0, floorY - box.h * 0.95, W, 10);
   ctx.fillStyle = dark ? '#2b3550' : '#c7d3de';
   ctx.fillRect(0, floorY, W, H - floorY);
   ctx.fillStyle = dark ? '#3a4566' : '#b3c1cd';
@@ -968,6 +993,7 @@ const showSound = () => {
 showSound();
 soundBtn.addEventListener('click', () => { Sfx.start(); Sfx.toggle(); showSound(); });
 $('startBtn').addEventListener('click', startGame);
+$('againBtn').addEventListener('click', startGame);
 
 readTheme();
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', readTheme);
