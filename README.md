@@ -2,7 +2,7 @@
 
 Small, self-contained browser games for kids. Each game is a single HTML file — open it in a browser, no install or build step needed.
 
-**[▶ Play Spark Count now](https://thedigital1.github.io/Simple-kids-games/spark-count/)** · **[▶ Play Bubble Pop now](https://thedigital1.github.io/Simple-kids-games/bubble-pop/)** · **[▶ Play Bubble Gum now](https://thedigital1.github.io/Simple-kids-games/bubble-gum/)** · **[▶ Play Build It! now](https://thedigital1.github.io/Simple-kids-games/build-it/)**
+**[▶ Play Spark Count now](https://thedigital1.github.io/Simple-kids-games/spark-count/)** · **[▶ Play Bubble Pop now](https://thedigital1.github.io/Simple-kids-games/bubble-pop/)** · **[▶ Play Bubble Gum now](https://thedigital1.github.io/Simple-kids-games/bubble-gum/)** · **[▶ Play Build It! now](https://thedigital1.github.io/Simple-kids-games/build-it/)** · **[▶ Play Car Wash now](https://thedigital1.github.io/Simple-kids-games/car-wash/)**
 
 ## Games
 
@@ -12,6 +12,7 @@ Small, self-contained browser games for kids. Each game is a single HTML file �
 | Bubble Pop | [▶ Play now](https://thedigital1.github.io/Simple-kids-games/bubble-pop/) | A bunny blows bubbles: first 1, then 4, then 8 — and after that it blows a new one for every pop, so there are always 8 to chase. Pop as many as you can in one minute! Bubbles drift on the breeze, and popping one pushes its neighbors away. |
 | Bubble Gum | [▶ Play now](https://thedigital1.github.io/Simple-kids-games/bubble-gum/) | Hold to blow a bubble gum bubble and let go to stop — each breath starts strong and fades. Get the bubble right up to the circle for 100 points, but go past it and it pops on the boy's face! Five rounds, scored out of 500. |
 | Build It! | [▶ Play now](https://thedigital1.github.io/Simple-kids-games/build-it/) | A little truck tips out a load of parts. Drag each one onto its blueprint outline to build a car, a digger, a tractor, an airplane, a fire truck and a rocket — then watch it come alive and drive or fly away! No timer; a pointing hand helps if you get stuck. |
+| Car Wash | [▶ Play now](https://thedigital1.github.io/Simple-kids-games/car-wash/) | Muddy vehicles roll into the wash bay looking grumpy. Rub with your finger to scrub off the mud, rinse away the soap with the hose, then wipe off the drops until it sparkles — it cheers up as it gets cleaner, honks thank you and drives off. No timer, no score. |
 
 ## Install as an app
 

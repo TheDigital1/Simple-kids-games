@@ -1,0 +1,987 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Car Wash</title>
+<meta name="description" content="Muddy vehicles roll in. Scrub, rinse and shine them until they sparkle!">
+<meta name="theme-color" content="#d8f1ff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1b2a4d" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Car Wash">
+<style>
+  :root {
+    --bg: #d8f1ff;
+    --hud-bg: rgba(255, 255, 255, 0.8);
+    --hud-fg: #1d3557;
+    --card-bg: #ffffff;
+    --card-fg: #1d3557;
+    --muted: rgba(29, 53, 87, 0.72);
+    --accent: #1fa2ff;
+    --accent-dark: #0b6fc0;
+    --tool-bg: rgba(255, 255, 255, 0.85);
+    --mode: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1b2a4d; --hud-bg: rgba(16, 26, 56, 0.65); --hud-fg: #eaf4ff;
+      --card-bg: #22346a; --card-fg: #eaf4ff; --muted: rgba(234, 244, 255, 0.75);
+      --tool-bg: rgba(30, 46, 92, 0.85); --mode: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1b2a4d; --hud-bg: rgba(16, 26, 56, 0.65); --hud-fg: #eaf4ff;
+    --card-bg: #22346a; --card-fg: #eaf4ff; --muted: rgba(234, 244, 255, 0.75);
+    --tool-bg: rgba(30, 46, 92, 0.85); --mode: dark;
+  }
+  html, body { height: 100%; margin: 0; overflow: hidden; background: var(--bg); }
+  body {
+    font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+    -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+  }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; display: block; }
+  [hidden] { display: none !important; }
+
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0;
+    display: grid; grid-template-columns: 1fr auto 1fr; align-items: start;
+    padding: calc(env(safe-area-inset-top, 0px) + 12px) calc(env(safe-area-inset-right, 0px) + 14px) 0 calc(env(safe-area-inset-left, 0px) + 14px);
+    pointer-events: none;
+  }
+  .pill {
+    background: var(--hud-bg); color: var(--hud-fg);
+    border-radius: 999px; font-weight: 800;
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    box-shadow: 0 2px 10px rgba(20, 40, 80, 0.12);
+  }
+  #count { justify-self: start; display: flex; flex-direction: column; align-items: center; padding: 6px 18px 10px; }
+  #count small { font-size: 12px; letter-spacing: 0.14em; opacity: 0.75; }
+  #countNum { font-size: 26px; line-height: 1.3; font-variant-numeric: tabular-nums; }
+  #countNum.bump { animation: bump 0.4s ease-out; }
+  @keyframes bump { 40% { transform: scale(1.35); } }
+  #step { padding: 14px 22px; font-size: 22px; line-height: 1; white-space: nowrap; }
+  #sound {
+    justify-self: end; pointer-events: auto; cursor: pointer; border: 0;
+    font-size: 22px; line-height: 1; padding: 11px 13px;
+  }
+  #sound:focus-visible, .play:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+
+  /* Tool tray: shows which step we're on; the canvas does the scrubbing */
+  #tools {
+    position: fixed; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+    display: flex; justify-content: center; gap: 14px; pointer-events: none;
+  }
+  .tool {
+    position: relative; width: 72px; height: 72px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; font-size: 36px;
+    background: var(--tool-bg); box-shadow: 0 3px 12px rgba(20, 40, 80, 0.15);
+    opacity: 0.45; transform: scale(0.88); transition: opacity 0.3s, transform 0.3s;
+  }
+  .tool::before {             /* progress ring around the current tool */
+    content: ""; position: absolute; inset: -5px; border-radius: 50%;
+    background: conic-gradient(var(--accent) calc(var(--p, 0) * 1turn), transparent 0);
+    -webkit-mask: radial-gradient(circle, transparent 38px, #000 39px);
+            mask: radial-gradient(circle, transparent 38px, #000 39px);
+  }
+  .tool.on { opacity: 1; transform: scale(1.06); }
+  .tool.done { opacity: 0.9; transform: scale(0.88); }
+  /* Short landscape screens: tools stand in a column on the right to leave room for the vehicle */
+  @media (orientation: landscape) and (max-height: 520px) {
+    #tools {
+      left: auto; bottom: auto; top: 50%; transform: translateY(-50%); flex-direction: column; gap: 10px;
+      right: calc(env(safe-area-inset-right, 0px) + 12px);
+    }
+    .tool { width: 60px; height: 60px; font-size: 30px; }
+    .tool::before {
+      -webkit-mask: radial-gradient(circle, transparent 32px, #000 33px);
+              mask: radial-gradient(circle, transparent 32px, #000 33px);
+    }
+  }
+  .tool.done::after {
+    content: "✓"; position: absolute; right: -4px; top: -4px; width: 26px; height: 26px; border-radius: 50%;
+    background: #2fbf71; color: #fff; font-size: 17px; font-weight: 900;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  .overlay {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    padding: 16px; background: rgba(15, 30, 60, 0.25);
+  }
+  .card {
+    background: var(--card-bg); color: var(--card-fg);
+    border-radius: 28px; padding: 28px 22px 30px; width: 100%; max-width: 380px;
+    text-align: center; box-shadow: 0 18px 50px rgba(15, 30, 60, 0.3); box-sizing: border-box;
+  }
+  .card h1 { margin: 0 0 10px; font-size: 38px; line-height: 1.1; }
+  .card p { margin: 0; font-size: 18px; line-height: 1.4; color: var(--muted); }
+  .steps { font-size: 34px; letter-spacing: 8px; margin: 14px 0 0; }
+  .play {
+    font: 800 26px/1 "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+    color: #fff; background: var(--accent); border: 0; border-radius: 999px;
+    padding: 18px 44px; margin-top: 22px; cursor: pointer;
+    box-shadow: 0 6px 0 var(--accent-dark);
+  }
+  .play:active { transform: translateY(4px); box-shadow: 0 2px 0 var(--accent-dark); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud">
+  <div id="count" class="pill" aria-label="Vehicles washed"><small>WASHED</small><span id="countNum">0</span></div>
+  <div id="step" class="pill" aria-live="polite">Car Wash</div>
+  <button id="sound" class="pill" type="button" aria-label="Turn sound off">🔊</button>
+</div>
+
+<div id="tools" aria-hidden="true">
+  <div class="tool" id="tool0">🧽</div>
+  <div class="tool" id="tool1">🚿</div>
+  <div class="tool" id="tool2">✨</div>
+</div>
+
+<div id="startScreen" class="overlay">
+  <div class="card">
+    <h1>Car Wash</h1>
+    <p>Muddy vehicles need your help! Rub them with your finger to scrub, rinse and shine.</p>
+    <div class="steps" aria-hidden="true">🧽 🚿 ✨</div>
+    <button class="play" id="startBtn" type="button">Let's wash ▶</button>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const $ = id => document.getElementById(id);
+const TAU = Math.PI * 2;
+let W, H, dpr, playTop, toolsTop, toolsSide = false, bayW;
+
+// =====================================================================
+// Sound effects, made on the fly with the Web Audio API
+// =====================================================================
+const Sfx = (() => {
+  let ac = null, master = null, noiseBuf = null;
+  let scrubGain, scrubFilter, waterGain, engGain, engOsc;
+  let on = true;
+  try { on = localStorage.getItem('carwash-sound') !== 'off'; } catch (e) {}
+
+  function loop(type, freq, q) {
+    const src = ac.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+    const f = ac.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q;
+    const g = ac.createGain(); g.gain.value = 0;
+    src.connect(f); f.connect(g); g.connect(master); src.start();
+    return [g, f];
+  }
+  function start() {                           // browsers only allow audio after a tap
+    if (ac) { if (ac.state === 'suspended') ac.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    ac = new AC();
+    const comp = ac.createDynamicsCompressor();
+    master = ac.createGain();
+    master.gain.value = on ? 0.6 : 0;
+    master.connect(comp); comp.connect(ac.destination);
+    noiseBuf = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
+    const d = noiseBuf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    [scrubGain, scrubFilter] = loop('bandpass', 1800, 4);   // squishy scrubbing
+    [waterGain] = loop('highpass', 2500, 0.5);             // hose spray
+    engOsc = ac.createOscillator(); engOsc.type = 'sawtooth'; engOsc.frequency.value = 50;
+    const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 240;
+    engGain = ac.createGain(); engGain.gain.value = 0;
+    engOsc.connect(lp); lp.connect(engGain); engGain.connect(master); engOsc.start();
+  }
+  const ready = () => ac && on && ac.state === 'running';
+  const set = (g, v) => { if (g) g.gain.setTargetAtTime(on ? v : 0, ac.currentTime, 0.05); };
+
+  function tone(freq, freqEnd, dur, vol, type = 'sine', delay = 0) {
+    const t = ac.currentTime + delay;
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    if (freqEnd !== freq) o.frequency.exponentialRampToValueAtTime(freqEnd, t + dur);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(master);
+    o.start(t); o.stop(t + dur + 0.05);
+  }
+
+  return {
+    start,
+    get on() { return on; },
+    toggle() {
+      on = !on;
+      try { localStorage.setItem('carwash-sound', on ? 'on' : 'off'); } catch (e) {}
+      if (master) master.gain.setTargetAtTime(on ? 0.6 : 0, ac.currentTime, 0.05);
+      if (!on && window.speechSynthesis) speechSynthesis.cancel();
+      return on;
+    },
+    scrub(level) {
+      if (!scrubGain) return;
+      set(scrubGain, level * 0.25);
+      scrubFilter.frequency.setTargetAtTime(1500 + Math.random() * 900, ac.currentTime, 0.05);
+    },
+    water(level) { if (waterGain) set(waterGain, level * 0.16); },
+    engine(level) {
+      if (!engGain) return;
+      set(engGain, level * 0.12);
+      engOsc.frequency.setTargetAtTime(46 + level * 30, ac.currentTime, 0.1);
+    },
+    bubble() {
+      if (!ready()) return;
+      const f = 700 + Math.random() * 900;
+      tone(f, f * 1.8, 0.06, 0.07, 'sine');
+    },
+    squeak() {
+      if (!ready()) return;
+      const f = 1800 + Math.random() * 700;
+      tone(f, f * 1.25, 0.09, 0.05, 'triangle');
+    },
+    stepDone() {
+      if (!ready()) return;
+      [784, 1047].forEach((f, i) => tone(f, f, 0.22, 0.13, 'triangle', i * 0.1));
+    },
+    sadHonk() {
+      if (!ready()) return;
+      tone(300, 220, 0.35, 0.1, 'square'); tone(240, 180, 0.35, 0.06, 'square');
+    },
+    honk() {
+      if (!ready()) return;
+      for (const d of [0, 0.22]) { tone(392, 392, 0.17, 0.12, 'square', d); tone(494, 494, 0.17, 0.08, 'square', d); }
+    },
+    sparkle() {
+      if (!ready()) return;
+      [1319, 1568, 2093, 2637].forEach((f, i) => tone(f, f, 0.3, 0.06, 'sine', i * 0.07));
+    },
+  };
+})();
+
+const voiceOK = 'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined';
+function say(text) {
+  if (!voiceOK || !Sfx.on) return;
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    const v = speechSynthesis.getVoices().find(v => /^en/i.test(v.lang));
+    if (v) u.voice = v;
+    u.lang = v ? v.lang : 'en-US'; u.rate = 0.95; u.pitch = 1.2;
+    speechSynthesis.speak(u);
+  } catch (e) {}
+}
+
+// =====================================================================
+// Vehicle artwork (shared with Build It!)
+// =====================================================================
+// <art>
+// Fill and outline a path: real colors, or a dashed see-through "ghost" for the blueprint
+function fs(g, ghost, color) {
+  if (ghost) {
+    g.fillStyle = 'rgba(255, 255, 255, 0.14)'; g.fill();
+    g.setLineDash([9, 7]); g.strokeStyle = 'rgba(255, 255, 255, 0.95)'; g.lineWidth = 3.5; g.stroke(); g.setLineDash([]);
+  } else {
+    g.fillStyle = color; g.fill();
+    g.strokeStyle = shade(color); g.lineWidth = 4; g.stroke();
+  }
+}
+function shade(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  const f = c => Math.round(c * 0.62).toString(16).padStart(2, '0');
+  return '#' + f(n >> 16) + f((n >> 8) & 255) + f(n & 255);
+}
+function rr(g, x, y, w, h, r) {
+  g.beginPath();
+  g.moveTo(x + r, y); g.lineTo(x + w - r, y); g.quadraticCurveTo(x + w, y, x + w, y + r);
+  g.lineTo(x + w, y + h - r); g.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  g.lineTo(x + r, y + h); g.quadraticCurveTo(x, y + h, x, y + h - r);
+  g.lineTo(x, y + r); g.quadraticCurveTo(x, y, x + r, y); g.closePath();
+}
+const poly = (g, pts) => { g.beginPath(); pts.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); };
+const circle = (g, x, y, r) => { g.beginPath(); g.arc(x, y, r, 0, TAU); };
+
+function wheelPart(r, at) {
+  return {
+    type: 'wheel' + r, at, box: [-r - 3, -r - 3, r + 3, r + 3], round: true,
+    draw(g, ghost, spin = 0) {
+      circle(g, 0, 0, r); fs(g, ghost, '#3b3f46');
+      if (ghost) return;
+      circle(g, 0, 0, r * 0.56); g.fillStyle = '#d3d8df'; g.fill();
+      g.fillStyle = '#8a929c';
+      for (let i = 0; i < 5; i++) { const a = spin + i * TAU / 5; circle(g, Math.cos(a) * r * 0.34, Math.sin(a) * r * 0.34, r * 0.08); g.fill(); }
+      circle(g, 0, 0, r * 0.14); g.fill();
+    },
+  };
+}
+
+// Each vehicle: parts with a type, a slot position ("at"), a hit box, and a draw function.
+// Parts of the same type look the same, so they can go in either matching slot.
+const VEHICLES = [
+  { name: 'Car', say: 'A car! Beep beep!', exit: 'drive', eyes: [[18, -48], [42, -48]], parts: [
+    { type: 'carBody', at: [0, 0], box: [-140, -76, 142, 44], draw(g, gh) {
+      g.beginPath();
+      g.moveTo(-135, 40); g.lineTo(-135, -5); g.quadraticCurveTo(-133, -25, -105, -28); g.lineTo(-75, -30);
+      g.lineTo(-45, -72); g.lineTo(45, -72); g.lineTo(80, -30); g.lineTo(115, -26);
+      g.quadraticCurveTo(138, -22, 138, 0); g.lineTo(138, 40); g.closePath();
+      fs(g, gh, '#e8453c');
+      if (gh) return;
+      g.fillStyle = '#bfe6ff';
+      poly(g, [[-66, -32], [-40, -64], [-6, -64], [-6, -32]]); g.fill();
+      poly(g, [[4, -32], [4, -64], [40, -64], [68, -32]]); g.fill();
+      g.fillStyle = '#ffe170'; circle(g, 128, -8, 8); g.fill();
+      g.strokeStyle = 'rgba(0,0,0,0.25)'; g.lineWidth = 3; g.beginPath(); g.moveTo(-1, -30); g.lineTo(-1, 30); g.stroke();
+    } },
+    wheelPart(34, [-80, 40]), wheelPart(34, [80, 40]),
+  ] },
+  { name: 'Digger', say: 'A digger! Dig dig dig!', exit: 'drive', eyes: [[-77, -60], [-55, -60]], parts: [
+    { type: 'tracks', at: [-20, 52], box: [-112, -28, 92, 28], spinParts: true, draw(g, gh, spin = 0) {
+      rr(g, -110, -26, 200, 52, 26); fs(g, gh, '#4a4f57');
+      if (gh) return;
+      for (const x of [-80, -32, 16, 62]) {
+        circle(g, x, 0, 15); g.fillStyle = '#9aa3ad'; g.fill();
+        g.fillStyle = '#5d646d'; circle(g, x + Math.cos(spin) * 7, Math.sin(spin) * 7, 3.5); g.fill();
+      }
+    } },
+    { type: 'diggerCab', at: [-40, -5], box: [-77, -87, 47, 27], draw(g, gh) {
+      g.beginPath();
+      g.moveTo(-75, 25); g.lineTo(-75, -10); g.lineTo(-60, -10); g.lineTo(-60, -75); g.quadraticCurveTo(-60, -85, -50, -85);
+      g.lineTo(0, -85); g.quadraticCurveTo(10, -85, 10, -75); g.lineTo(10, -25); g.lineTo(45, -25); g.lineTo(45, 25); g.closePath();
+      fs(g, gh, '#ffc21a');
+      if (gh) return;
+      rr(g, -50, -75, 50, 46, 7); g.fillStyle = '#bfe6ff'; g.fill();
+      g.fillStyle = '#2b2f36'; rr(g, -75, 4, 120, 8, 3); g.fill();
+    } },
+    { type: 'boom', at: [55, -40], box: [-20, -82, 106, 26], draw(g, gh) {
+      poly(g, [[-18, 8], [4, -12], [68, -80], [92, -70], [104, 20], [86, 24], [78, -46], [10, 12]]);
+      fs(g, gh, '#ffb300');
+      if (gh) return;
+      g.fillStyle = '#6b7280'; circle(g, 80, -66, 7); g.fill(); circle(g, -4, 0, 7); g.fill();
+    } },
+    { type: 'bucket', at: [150, -5], box: [-28, -28, 34, 34], draw(g, gh) {
+      g.beginPath(); g.moveTo(-22, -25); g.lineTo(22, -25); g.quadraticCurveTo(32, 18, -8, 30); g.lineTo(-26, 22); g.closePath();
+      fs(g, gh, '#7b8490');
+      if (gh) return;
+      g.fillStyle = '#5a626c';
+      for (let i = 0; i < 3; i++) { poly(g, [[-22 + i * 6, 24 - i * 2], [-26 + i * 6, 34 - i * 2], [-16 + i * 6, 26 - i * 2]]); g.fill(); }
+    } },
+  ] },
+  { name: 'Tractor', say: 'A tractor! Vroom!', exit: 'drive', eyes: [[-64, -60], [-42, -60]], parts: [
+    { type: 'tractorBody', at: [20, 0], box: [-42, -37, 92, 22], draw(g, gh) {
+      rr(g, -40, -35, 130, 55, 12); fs(g, gh, '#43a047');
+      if (gh) return;
+      g.fillStyle = '#2e7d32'; for (let i = 0; i < 4; i++) { rr(g, 40 + i * 11, -24, 6, 30, 3); g.fill(); }
+      g.fillStyle = '#ffe170'; circle(g, 84, -18, 7); g.fill();
+    } },
+    { type: 'tractorCab', at: [-50, -25], box: [-47, -77, 37, 17], draw(g, gh) {
+      g.beginPath();
+      g.moveTo(-45, 15); g.lineTo(-45, -65); g.quadraticCurveTo(-45, -75, -35, -75); g.lineTo(25, -75);
+      g.quadraticCurveTo(35, -75, 35, -65); g.lineTo(35, 15); g.closePath();
+      fs(g, gh, '#43a047');
+      if (gh) return;
+      rr(g, -33, -63, 56, 48, 6); g.fillStyle = '#bfe6ff'; g.fill();
+      g.fillStyle = '#ffffff'; rr(g, -45, -80, 80, 9, 4); g.fill();
+    } },
+    { ...wheelPart(52, [-58, 30]) },
+    { ...wheelPart(30, [88, 48]) },
+    { type: 'exhaust', at: [64, -60], box: [-9, -34, 9, 26], draw(g, gh) {
+      rr(g, -7, -32, 14, 56, 6); fs(g, gh, '#78808a');
+      if (gh) return;
+      g.fillStyle = '#3d434b'; rr(g, -7, -32, 14, 8, 3); g.fill();
+    } },
+  ] },
+  { name: 'Airplane', say: 'An airplane! Whoosh!', exit: 'fly', eyes: [[96, -12], [116, -10]], parts: [
+    { type: 'fuselage', at: [0, 0], box: [-150, -32, 147, 27], draw(g, gh) {
+      g.beginPath();
+      g.moveTo(-140, -10); g.quadraticCurveTo(-150, -30, -120, -30); g.lineTo(90, -30);
+      g.quadraticCurveTo(140, -28, 145, 0); g.quadraticCurveTo(140, 25, 90, 25); g.lineTo(-110, 20); g.closePath();
+      fs(g, gh, '#4fa3ff');
+      if (gh) return;
+      g.fillStyle = '#ffffff'; rr(g, -120, -4, 200, 8, 4); g.fill();
+      g.fillStyle = '#e6f6ff'; for (let i = 0; i < 4; i++) { circle(g, -60 + i * 34, -14, 8); g.fill(); }
+    } },
+    { type: 'wing', at: [0, 12], box: [-56, -4, 46, 50], draw(g, gh) {
+      poly(g, [[-52, 0], [42, 0], [12, 46], [-44, 46]]); fs(g, gh, '#2f7fe0');
+    } },
+    { type: 'tail', at: [-120, -40], box: [-24, -48, 34, 14], draw(g, gh) {
+      poly(g, [[-22, 12], [-6, -46], [18, -46], [32, 12]]); fs(g, gh, '#ffcf3a');
+    } },
+    { type: 'propeller', at: [152, 0], box: [-14, -46, 14, 46], spinParts: true, draw(g, gh, spin = 0) {
+      const sq = gh ? 1 : Math.cos(spin * 3);
+      g.beginPath(); g.ellipse(0, 0, 9, 44 * Math.max(0.15, Math.abs(sq)), 0, 0, TAU); fs(g, gh, '#5b6470');
+      if (gh) return;
+      circle(g, 0, 0, 10); g.fillStyle = '#ff5f5f'; g.fill();
+    } },
+    { ...wheelPart(20, [30, 52]) },
+  ] },
+  { name: 'Fire truck', say: 'A fire truck! Nee naw nee naw!', exit: 'drive', eyes: [[92, -30], [112, -28]], parts: [
+    { type: 'fireBody', at: [-40, 10], box: [-122, -57, 52, 32], draw(g, gh) {
+      rr(g, -120, -55, 170, 85, 10); fs(g, gh, '#e53935');
+      if (gh) return;
+      g.fillStyle = '#ffffff'; rr(g, -120, -6, 170, 10, 2); g.fill();
+      g.fillStyle = '#b71c1c'; rr(g, -105, -45, 60, 32, 6); g.fill(); rr(g, -35, -45, 60, 32, 6); g.fill();
+    } },
+    { type: 'fireCab', at: [90, 5], box: [-42, -62, 57, 32], draw(g, gh) {
+      g.beginPath(); g.moveTo(-40, 30); g.lineTo(-40, -60); g.lineTo(10, -60); g.lineTo(50, -15); g.lineTo(55, 30); g.closePath();
+      fs(g, gh, '#e53935');
+      if (gh) return;
+      g.fillStyle = '#bfe6ff'; poly(g, [[-28, -48], [5, -48], [35, -15], [-28, -15]]); g.fill();
+      g.fillStyle = '#ffffff'; rr(g, -40, -1, 95, 10, 2); g.fill();
+      g.fillStyle = '#ffe170'; circle(g, 48, 12, 6); g.fill();
+    } },
+    { type: 'ladder', at: [-40, -62], box: [-124, -12, 64, 12], draw(g, gh) {
+      rr(g, -122, -10, 184, 20, 5); fs(g, gh, '#c3cad3');
+      if (gh) return;
+      g.fillStyle = '#8a929c'; for (let x = -110; x < 60; x += 20) { rr(g, x, -6, 6, 12, 2); g.fill(); }
+    } },
+    { type: 'siren', at: [70, -68], box: [-22, -22, 22, 6], draw(g, gh) {
+      g.beginPath(); g.moveTo(-20, 4); g.lineTo(-20, -6); g.quadraticCurveTo(-20, -20, 0, -20); g.quadraticCurveTo(20, -20, 20, -6); g.lineTo(20, 4); g.closePath();
+      fs(g, gh, '#2b8cff');
+      if (gh) return;
+      g.fillStyle = 'rgba(255,255,255,0.6)'; g.beginPath(); g.ellipse(-7, -10, 5, 3, -0.4, 0, TAU); g.fill();
+    } },
+    wheelPart(30, [-110, 45]), wheelPart(30, [85, 45]),
+  ] },
+  { name: 'Rocket', say: 'A rocket! Three, two, one, blast off!', exit: 'rocket', eyes: [[-16, 12], [16, 12]], parts: [
+    { type: 'rocketBody', at: [0, 0], box: [-47, -112, 47, 92], draw(g, gh) {
+      rr(g, -45, -110, 90, 200, 44); fs(g, gh, '#eef1f6');
+      if (gh) return;
+      g.save(); rr(g, -45, -110, 90, 200, 44); g.clip();
+      g.fillStyle = '#ff5f5f'; g.fillRect(-50, 46, 100, 14); g.restore();
+    } },
+    { type: 'nose', at: [0, -128], box: [-47, -64, 47, 28], draw(g, gh) {
+      g.beginPath(); g.moveTo(-44, 26); g.quadraticCurveTo(-34, -30, 0, -62); g.quadraticCurveTo(34, -30, 44, 26); g.closePath();
+      fs(g, gh, '#ff5f5f');
+    } },
+    { type: 'window', at: [0, -50], box: [-31, -31, 31, 31], draw(g, gh) {
+      circle(g, 0, 0, 28); fs(g, gh, '#9aa3ad');
+      if (gh) return;
+      circle(g, 0, 0, 19); g.fillStyle = '#6cc8ff'; g.fill();
+      g.fillStyle = 'rgba(255,255,255,0.7)'; circle(g, -6, -7, 5); g.fill();
+    } },
+    { type: 'finL', at: [-56, 62], box: [-38, -48, 13, 44], draw(g, gh) {
+      poly(g, [[10, -46], [10, 26], [-36, 42], [-30, -4]]); fs(g, gh, '#ff5f5f');
+    } },
+    { type: 'finR', at: [56, 62], box: [-13, -48, 38, 44], draw(g, gh) {
+      poly(g, [[-10, -46], [-10, 26], [36, 42], [30, -4]]); fs(g, gh, '#ff5f5f');
+    } },
+    { type: 'flame', at: [0, 118], box: [-30, -26, 30, 48], draw(g, gh, spin = 0) {
+      const f = gh ? 1 : 1 + Math.sin(spin * 9) * 0.12;
+      g.beginPath(); g.moveTo(-26, -22); g.quadraticCurveTo(-30, 18 * f, 0, 46 * f); g.quadraticCurveTo(30, 18 * f, 26, -22); g.closePath();
+      fs(g, gh, '#ff9a1f');
+      if (gh) return;
+      g.beginPath(); g.moveTo(-13, -20); g.quadraticCurveTo(-14, 8 * f, 0, 26 * f); g.quadraticCurveTo(14, 8 * f, 13, -20); g.closePath();
+      g.fillStyle = '#ffe170'; g.fill();
+    } },
+  ] },
+];
+// </art>
+
+// Eyes that go from grumpy (half shut, frowning) to wide open, and ^ ^ when sparkling clean
+function drawMoodEyes(g, eyes, mood, happy, blink) {
+  for (const [ex, ey] of eyes) {
+    if (happy || blink) {
+      g.strokeStyle = '#26303d'; g.lineWidth = 4;
+      g.beginPath();
+      if (happy) g.arc(ex, ey + 4, 9, 1.15 * Math.PI, 1.85 * Math.PI);
+      else g.arc(ex, ey - 2, 8, 0.15 * Math.PI, 0.85 * Math.PI);
+      g.stroke();
+      continue;
+    }
+    g.save();
+    g.beginPath(); g.ellipse(ex, ey, 10, 12, 0, 0, TAU); g.fillStyle = '#ffffff'; g.fill();
+    g.strokeStyle = 'rgba(0,0,0,0.25)'; g.lineWidth = 2; g.stroke();
+    g.clip();
+    g.beginPath(); g.arc(ex + 2, ey + 3, 5.5, 0, TAU); g.fillStyle = '#26303d'; g.fill();
+    g.beginPath(); g.arc(ex, ey, 1.8, 0, TAU); g.fillStyle = '#ffffff'; g.fill();
+    // Droopy lid while dirty
+    const lid = -12 + (1 - mood) * 13;
+    g.fillStyle = '#9a7b5a';
+    g.fillRect(ex - 12, ey - 14, 24, lid + 14);
+    g.restore();
+    if (mood < 0.6) {
+      g.strokeStyle = '#26303d'; g.lineWidth = 3;
+      g.beginPath(); g.moveTo(ex - 11, ey + lid - 1); g.lineTo(ex + 11, ey + lid - 1); g.stroke();
+    }
+  }
+}
+
+// =====================================================================
+// Layout and masks
+// =====================================================================
+// The dirt, foam and water drops live on small offscreen "mask" canvases over the vehicle.
+// MR is their resolution compared to screen pixels (lower = faster to scrub and count).
+const MR = 0.5;
+let veh = null, scale = 1, vbox = null, vcx = 0, vcy = 0;
+let box = { x: 0, y: 0, w: 1, h: 1 };          // vehicle area on screen (before driving offsets)
+const sil = document.createElement('canvas'), silCtx = sil.getContext('2d');
+const mud = document.createElement('canvas'), mudCtx = mud.getContext('2d', { willReadFrequently: true });
+const foam = document.createElement('canvas'), foamCtx = foam.getContext('2d', { willReadFrequently: true });
+const drops = document.createElement('canvas'), dropsCtx = drops.getContext('2d', { willReadFrequently: true });
+const glint = document.createElement('canvas'), glintCtx = glint.getContext('2d');
+
+let dark = false;
+function readTheme() { dark = getComputedStyle(document.documentElement).getPropertyValue('--mode').trim() === 'dark'; }
+
+function bboxOf(def) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const p of def.parts) {
+    x0 = Math.min(x0, p.at[0] + p.box[0]); y0 = Math.min(y0, p.at[1] + p.box[1]);
+    x1 = Math.max(x1, p.at[0] + p.box[2]); y1 = Math.max(y1, p.at[1] + p.box[3]);
+  }
+  return { x0, y0, x1, y1, w: x1 - x0, h: y1 - y0 };
+}
+
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight;
+  canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+  playTop = $('hud').getBoundingClientRect().bottom + 8;
+  // Tools along the bottom, or in a column on the right on short landscape screens
+  const tr = $('tools').getBoundingClientRect();
+  toolsSide = getComputedStyle($('tools')).flexDirection === 'column';
+  toolsTop = toolsSide ? H - 8 : tr.top - 8;
+  bayW = toolsSide ? tr.left - 12 : W;
+  fitStep();
+  if (veh) layoutVehicle(false);
+}
+
+// Vehicle in the middle of the wash bay. If the size changes mid-wash, masks are rescaled.
+function layoutVehicle(fresh) {
+  vbox = bboxOf(veh);
+  vcx = (vbox.x0 + vbox.x1) / 2; vcy = (vbox.y0 + vbox.y1) / 2;
+  const availH = toolsTop - playTop;
+  scale = Math.min(bayW * 0.84 / vbox.w, availH * (toolsSide ? 0.78 : 0.7) / vbox.h, 2.4);
+  const pad = 10;
+  const old = fresh ? null : { w: mud.width, h: mud.height };
+  box = { w: vbox.w * scale + pad * 2, h: vbox.h * scale + pad * 2 };
+  box.x = bayW / 2 - box.w / 2;
+  box.y = playTop + availH * 0.52 - box.h / 2;
+  const mw = Math.max(1, Math.round(box.w * MR)), mh = Math.max(1, Math.round(box.h * MR));
+  // Silhouette: the vehicle's shape, used to keep dirt and foam on the vehicle only
+  sil.width = mw; sil.height = mh;
+  silCtx.setTransform(MR, 0, 0, MR, 0, 0);
+  drawVehicleShape(silCtx, box.w / 2, box.h / 2, 0);
+  for (const [c, cx] of [[mud, mudCtx], [foam, foamCtx], [drops, dropsCtx]]) {
+    if (fresh) { c.width = mw; c.height = mh; continue; }
+    const tmp = document.createElement('canvas'); tmp.width = c.width; tmp.height = c.height;
+    tmp.getContext('2d').drawImage(c, 0, 0);
+    c.width = mw; c.height = mh;
+    cx.drawImage(tmp, 0, 0, old.w, old.h, 0, 0, mw, mh);
+  }
+  glint.width = mw; glint.height = mh;
+  if (!fresh && phase === 'wash') startCover *= (mw * mh) / (old.w * old.h);   // progress stays right after a resize
+}
+
+// Draw the vehicle with its center at (x, y) in the given context
+function drawVehicleShape(g, x, y, spin) {
+  g.lineJoin = 'round'; g.lineCap = 'round';
+  for (const p of veh.parts) {
+    g.save();
+    g.translate(x + (p.at[0] - vcx) * scale, y + (p.at[1] - vcy) * scale);
+    g.scale(scale, scale);
+    const s = p.type === 'flame' ? performance.now() / 1000 : p.type === 'propeller' ? spin * 3 : spin;
+    p.draw(g, false, s);
+    g.restore();
+  }
+}
+
+// Clip a mask to the vehicle's shape
+function keepOnVehicle(c) {
+  c.globalCompositeOperation = 'destination-in';
+  c.drawImage(sil, 0, 0);
+  c.globalCompositeOperation = 'source-over';
+}
+
+function paintMud() {
+  const c = mudCtx, w = mud.width, h = mud.height;
+  c.clearRect(0, 0, w, h);
+  const browns = ['#7a5230', '#8b5e34', '#6b4423', '#94673b'];
+  const n = Math.round(w * h / 90);
+  for (let i = 0; i < n; i++) {
+    const x = Math.random() * w, y = Math.random() * h, r = 6 + Math.random() * 16;
+    c.fillStyle = browns[i % browns.length];
+    c.beginPath(); c.ellipse(x, y, r * (0.8 + Math.random() * 0.6), r, Math.random() * 3, 0, TAU); c.fill();
+  }
+  c.fillStyle = 'rgba(60, 35, 15, 0.6)';                  // darker specks
+  for (let i = 0; i < n / 3; i++) { c.beginPath(); c.arc(Math.random() * w, Math.random() * h, 1 + Math.random() * 2.5, 0, TAU); c.fill(); }
+  keepOnVehicle(c);
+}
+
+// Count how much of a mask is still covered (sampled for speed)
+function coverage(c, cx) {
+  const d = cx.getImageData(0, 0, c.width, c.height).data;
+  let n = 0;
+  for (let i = 3; i < d.length; i += 16) if (d[i] > 60) n++;
+  return n;
+}
+
+// =====================================================================
+// Game state
+// =====================================================================
+const STEPS = [
+  { tool: '🧽', title: 'Scrub the mud!', layer: 'mud' },
+  { tool: '🚿', title: 'Rinse the soap!', layer: 'foam' },
+  { tool: '✨', title: 'Wipe it shiny!', layer: 'drops' },
+];
+let phase = 'intro';       // intro | arrive | wash | clean | leave
+let phaseT = 0, step = 0, startCover = 1, progress = 0, washed = 0, order = [], orderI = 0;
+let ox = 0, spin = 0, carV = 0, bounce = 0, glintT = -1, blinkIn = 2, blinkT = 0, mood = 0;
+let pointer = null;        // { x, y, down }
+let lastStroke = null, strokeAmt = 0, checkT = 0, soundT = 0;
+const fx = [];             // splashes, sparkles, bubbles
+
+function fitStep() {
+  const el = $('step');
+  el.style.fontSize = '';
+  const max = W - 2 * Math.max($('count').offsetWidth, $('sound').offsetWidth) - 48;
+  for (let f = 22; f > 13 && el.offsetWidth > max; f -= 2) el.style.fontSize = f + 'px';
+}
+function showStep() {
+  STEPS.forEach((s, i) => {
+    const el = $('tool' + i);
+    el.classList.toggle('on', phase === 'wash' && i === step);
+    el.classList.toggle('done', i < step || phase === 'clean' || phase === 'leave');
+    el.style.setProperty('--p', i === step && phase === 'wash' ? progress : 0);
+  });
+}
+
+function nextVehicle() {
+  if (orderI >= order.length) {
+    order = VEHICLES.map((_, i) => i);
+    for (let i = order.length - 1; i > 0; i--) { const j = Math.random() * (i + 1) | 0; [order[i], order[j]] = [order[j], order[i]]; }
+    orderI = 0;
+  }
+  veh = VEHICLES[order[orderI++]];
+  layoutVehicle(true);
+  paintMud();
+  foamCtx.clearRect(0, 0, foam.width, foam.height);
+  dropsCtx.clearRect(0, 0, drops.width, drops.height);
+  step = 0; progress = 0; mood = 0; glintT = -1;
+  ox = -(W / 2 + box.w); carV = 0;
+  phase = 'arrive'; phaseT = 0;
+  $('step').textContent = `Here comes a muddy ${veh.name.toLowerCase()}!`; fitStep();
+  showStep();
+}
+
+function startGame() {
+  Sfx.start();
+  $('startScreen').hidden = true;
+  washed = 0; $('countNum').textContent = '0';
+  order = []; orderI = 0;
+  nextVehicle();
+}
+
+function beginStep(i) {
+  step = i;
+  const layer = { mud: [mud, mudCtx], foam: [foam, foamCtx], drops: [drops, dropsCtx] }[STEPS[i].layer];
+  startCover = Math.max(1, coverage(...layer));
+  progress = 0;
+  $('step').textContent = STEPS[i].title; fitStep();
+  showStep();
+}
+
+function finishStep() {
+  Sfx.stepDone();
+  if (step === 0) {
+    // Leftover mud melts into foam, then on to rinsing
+    mudCtx.clearRect(0, 0, mud.width, mud.height);
+    beginStep(1);
+  } else if (step === 1) {
+    foamCtx.clearRect(0, 0, foam.width, foam.height);
+    paintDrops();
+    beginStep(2);
+  } else {
+    dropsCtx.clearRect(0, 0, drops.width, drops.height);
+    phase = 'clean'; phaseT = 0; glintT = 0;
+    washed++;
+    const el = $('countNum'); el.textContent = washed;
+    el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump');
+    $('step').textContent = 'Sparkling clean!'; fitStep();
+    showStep();
+    Sfx.sparkle();
+    for (let i = 0; i < 30; i++) sparkleAt(box.x + Math.random() * box.w, box.y + Math.random() * box.h);
+  }
+}
+
+function paintDrops() {
+  const c = dropsCtx, w = drops.width, h = drops.height;
+  c.clearRect(0, 0, w, h);
+  const n = Math.round(w * h / 22);
+  for (let i = 0; i < n; i++) {
+    const x = Math.random() * w, y = Math.random() * h, r = 2 + Math.random() * 3.5;
+    c.fillStyle = 'rgba(150, 210, 255, 0.85)';
+    c.beginPath(); c.ellipse(x, y, r * 0.85, r, 0, 0, TAU); c.fill();
+    c.fillStyle = 'rgba(255, 255, 255, 0.95)';
+    c.beginPath(); c.arc(x - r * 0.3, y - r * 0.35, r * 0.3, 0, TAU); c.fill();
+  }
+  keepOnVehicle(c);
+}
+
+// Rub along a line from the last finger position, with the current tool
+function stroke(x0, y0, x1, y1) {
+  const r = Math.max(22, Math.min(46, box.w * 0.075)) * MR;
+  const ax = (x0 - box.x - ox) * MR, ay = (y0 - box.y) * MR, bx = (x1 - box.x - ox) * MR, by = (y1 - box.y) * MR;
+  const len = Math.hypot(bx - ax, by - ay), n = Math.max(1, Math.ceil(len / (r * 0.4)));
+  const erase = step === 0 ? mudCtx : step === 1 ? foamCtx : dropsCtx;
+  erase.globalCompositeOperation = 'destination-out';
+  for (let i = 0; i <= n; i++) {
+    const x = ax + (bx - ax) * i / n, y = ay + (by - ay) * i / n;
+    erase.beginPath(); erase.arc(x, y, r, 0, TAU); erase.fill();
+    if (step === 0) {
+      // Scrubbing leaves bubbly foam behind
+      for (let k = 0; k < 3; k++) {
+        const fx2 = x + (Math.random() - 0.5) * r * 1.8, fy2 = y + (Math.random() - 0.5) * r * 1.8, fr = 1.5 + Math.random() * 4;
+        foamCtx.fillStyle = Math.random() < 0.8 ? 'rgba(255,255,255,0.95)' : 'rgba(205,235,255,0.95)';
+        foamCtx.beginPath(); foamCtx.arc(fx2, fy2, fr, 0, TAU); foamCtx.fill();
+        foamCtx.strokeStyle = 'rgba(150,180,210,0.6)'; foamCtx.lineWidth = 0.6; foamCtx.stroke();
+      }
+    }
+  }
+  erase.globalCompositeOperation = 'source-over';
+  if (step === 0) keepOnVehicle(foamCtx);
+  strokeAmt += len / MR;
+}
+
+// =====================================================================
+// Update
+// =====================================================================
+function update(dt, t) {
+  phaseT += dt;
+  if (phase === 'arrive') {
+    const k = Math.min(1, phaseT / 1.6), e = 1 - Math.pow(1 - k, 3);
+    const nx = -(W / 2 + box.w) * (1 - e);
+    carV = (nx - ox) / dt; ox = nx;
+    spin += carV * dt / 34;
+    Sfx.engine(Math.min(1, Math.abs(carV) / 600));
+    if (k >= 1) { phase = 'wash'; phaseT = 0; carV = 0; Sfx.engine(0); Sfx.sadHonk(); beginStep(0); }
+  } else if (phase === 'clean') {
+    bounce = Math.sin(phaseT * 12) * Math.max(0, 1 - phaseT / 0.9) * 0.05;
+    if (phaseT > 0.5 && phaseT - dt <= 0.5) { Sfx.honk(); say(`Thank you! I'm all clean!`); }
+    if (Math.random() < 0.3) sparkleAt(box.x + ox + Math.random() * box.w, box.y + Math.random() * box.h);
+    if (phaseT > 2.4) { phase = 'leave'; phaseT = 0; }
+  } else if (phase === 'leave') {
+    carV += 900 * dt; ox += carV * dt; spin += carV * dt / 34;
+    Sfx.engine(Math.min(1, carV / 900));
+    if (box.x + ox > W + 20) { Sfx.engine(0); nextVehicle(); }
+  }
+
+  // Washing: how fast the finger moves drives the sounds
+  const rubbing = phase === 'wash' && pointer?.down;
+  const speed = strokeAmt / Math.max(dt, 0.001); strokeAmt = 0;
+  Sfx.scrub(rubbing && step !== 1 ? Math.min(1, speed / 900) : 0);
+  Sfx.water(rubbing && step === 1 ? 1 : 0);
+  if (rubbing && step === 1) splash(pointer.x, pointer.y);
+  if (rubbing && speed > 200) {
+    soundT -= dt;
+    if (soundT <= 0) { soundT = 0.12 + Math.random() * 0.15; step === 0 ? Sfx.bubble() : step === 2 ? Sfx.squeak() : null; }
+    if (step === 2 && Math.random() < 0.5) sparkleAt(pointer.x + (Math.random() - 0.5) * 40, pointer.y + (Math.random() - 0.5) * 40);
+  }
+  if (phase === 'wash') {
+    checkT -= dt;
+    if (checkT <= 0) {
+      checkT = 0.2;
+      const layer = { mud: [mud, mudCtx], foam: [foam, foamCtx], drops: [drops, dropsCtx] }[STEPS[step].layer];
+      progress = Math.min(1, 1 - coverage(...layer) / startCover);
+      showStep();
+      if (progress >= 0.94) finishStep();
+    }
+  }
+  // Happier the cleaner it gets
+  const target = phase === 'wash' ? (step + progress) / 3 : phase === 'arrive' ? 0 : 1;
+  mood += (target - mood) * (1 - Math.exp(-4 * dt));
+  blinkIn -= dt; blinkT -= dt;
+  if (blinkIn <= 0) { blinkT = 0.13; blinkIn = 2 + Math.random() * 3; }
+  if (glintT >= 0) glintT += dt;
+
+  for (let i = fx.length - 1; i >= 0; i--) {
+    const f = fx[i];
+    f.life -= dt * f.fade;
+    f.vy += f.g * dt; f.x += f.vx * dt; f.y += f.vy * dt;
+    if (f.life <= 0) fx.splice(i, 1);
+  }
+}
+
+function sparkleAt(x, y) {
+  if (fx.length > 240) return;
+  fx.push({ kind: 'spark', x, y, vx: 0, vy: -20, g: 0, life: 1, fade: 1.6, r: 5 + Math.random() * 7, rot: Math.random() * TAU });
+}
+function splash(x, y) {
+  for (let i = 0; i < 3 && fx.length < 240; i++) {
+    const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.4, s = 120 + Math.random() * 220;
+    fx.push({ kind: 'drop', x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, g: 900, life: 1, fade: 2.2, r: 2 + Math.random() * 3 });
+  }
+}
+
+// =====================================================================
+// Drawing
+// =====================================================================
+function drawBay() {
+  // Tiled wall
+  ctx.fillStyle = dark ? '#22345e' : '#e3f4ff';
+  ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = dark ? 'rgba(255,255,255,0.05)' : 'rgba(80,140,200,0.12)';
+  ctx.lineWidth = 2;
+  const tile = 46;
+  for (let y = 0; y < H; y += tile) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  for (let x = 0; x < W; x += tile) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+  // Blue stripe and floor
+  const floorY = box.y + box.h - 4;
+  ctx.fillStyle = dark ? '#1a6fb8' : '#4fb3ff';
+  ctx.fillRect(0, floorY - box.h * 0.95, W, 10);
+  ctx.fillStyle = dark ? '#2b3550' : '#c7d3de';
+  ctx.fillRect(0, floorY, W, H - floorY);
+  ctx.fillStyle = dark ? '#3a4566' : '#b3c1cd';
+  for (let x = -20; x < W; x += 60) ctx.fillRect(x, floorY + 18, 34, 6);
+  // Drain
+  ctx.fillStyle = dark ? '#1c2438' : '#8d9aa6';
+  rr(ctx, W / 2 - 40, floorY + 34, 80, 14, 7); ctx.fill();
+  // Hose nozzle coming from the ceiling (sprays during rinse)
+  ctx.strokeStyle = dark ? '#4a5a80' : '#7d8b99'; ctx.lineWidth = 8;
+  ctx.beginPath(); ctx.moveTo(bayW * 0.85, playTop - 30); ctx.lineTo(bayW * 0.85, playTop + 18); ctx.stroke();
+  ctx.fillStyle = '#ffb31f'; rr(ctx, bayW * 0.85 - 14, playTop + 14, 28, 22, 6); ctx.fill();
+}
+
+function drawVehicle(t) {
+  const cx = box.x + box.w / 2 + ox, cy = box.y + box.h / 2;
+  // Shadow
+  ctx.fillStyle = 'rgba(0, 20, 50, 0.15)';
+  ctx.beginPath(); ctx.ellipse(cx, box.y + box.h - 8, box.w * 0.45, 10, 0, 0, TAU); ctx.fill();
+  ctx.save();
+  ctx.translate(cx, cy); ctx.scale(1 + bounce, 1 - bounce); ctx.translate(-cx, -cy);
+  drawVehicleShape(ctx, cx, cy, spin);
+  // Dirt, foam and drops on top, stretched up from their small masks
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(mud, box.x + ox, box.y, box.w, box.h);
+  ctx.drawImage(foam, box.x + ox, box.y, box.w, box.h);
+  ctx.drawImage(drops, box.x + ox, box.y, box.w, box.h);
+  // A shiny glint sweeps across when it's clean
+  if (glintT >= 0 && glintT < 1.2) {
+    const gw = glint.width, gh = glint.height, k = glintT / 1.2;
+    glintCtx.clearRect(0, 0, gw, gh);
+    const gx = -gw * 0.4 + k * gw * 1.8;
+    const grad = glintCtx.createLinearGradient(gx - 40, 0, gx + 40, gh * 0.3);
+    grad.addColorStop(0, 'rgba(255,255,255,0)'); grad.addColorStop(0.5, 'rgba(255,255,255,0.85)'); grad.addColorStop(1, 'rgba(255,255,255,0)');
+    glintCtx.fillStyle = grad; glintCtx.fillRect(0, 0, gw, gh);
+    keepOnVehicle(glintCtx);
+    ctx.drawImage(glint, box.x + ox, box.y, box.w, box.h);
+  }
+  // Face
+  ctx.translate(cx - vcx * scale, cy - vcy * scale); ctx.scale(scale, scale);
+  drawMoodEyes(ctx, veh.eyes, Math.max(0, Math.min(1, mood)), phase === 'clean' || phase === 'leave', blinkT > 0);
+  ctx.restore();
+}
+
+function drawHoseStream(t) {
+  if (!(phase === 'wash' && step === 1 && pointer?.down)) return;
+  const nx = bayW * 0.85, ny = playTop + 34;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(140, 205, 255, 0.75)'; ctx.lineWidth = 10; ctx.lineCap = 'round';
+  ctx.setLineDash([18, 10]); ctx.lineDashOffset = -t * 300;
+  ctx.beginPath(); ctx.moveTo(nx, ny);
+  ctx.quadraticCurveTo((nx + pointer.x) / 2, Math.min(ny, pointer.y) - 30, pointer.x, pointer.y); ctx.stroke();
+  ctx.restore();
+}
+
+function drawFx() {
+  for (const f of fx) {
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, f.life);
+    ctx.translate(f.x, f.y);
+    if (f.kind === 'drop') {
+      ctx.fillStyle = 'rgba(150, 210, 255, 0.9)';
+      ctx.beginPath(); ctx.arc(0, 0, f.r, 0, TAU); ctx.fill();
+    } else {
+      ctx.rotate(f.rot + (1 - f.life) * 3);
+      ctx.fillStyle = '#fff6b0';
+      ctx.beginPath();
+      for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4, r = i % 2 ? f.r * 0.3 : f.r; ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 200, 40, 0.8)'; ctx.lineWidth = 1.5; ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+// The tool follows the finger (or mouse)
+function drawTool() {
+  if (phase !== 'wash' || !pointer) return;
+  const icon = step === 0 ? '🧽' : step === 1 ? '🚿' : '🧻';
+  ctx.save();
+  ctx.font = `${pointer.down ? 52 : 44}px system-ui, sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const wob = pointer.down ? Math.sin(performance.now() / 50) * 0.15 : 0;
+  ctx.translate(pointer.x, pointer.y); ctx.rotate(wob);
+  ctx.fillText(icon, 0, 0);
+  ctx.restore();
+}
+
+let last = performance.now();
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min((now - last) / 1000, 0.05);
+  last = now;
+  const t = now / 1000;
+  if (phase !== 'intro') update(dt, t);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  drawBay();
+  if (veh) drawVehicle(t);
+  drawHoseStream(t);
+  drawFx();
+  drawTool();
+}
+
+// =====================================================================
+// Input: rub anywhere over the vehicle
+// =====================================================================
+canvas.addEventListener('pointerdown', e => {
+  Sfx.start();
+  pointer = { x: e.clientX, y: e.clientY, down: true, id: e.pointerId };
+  lastStroke = { x: e.clientX, y: e.clientY };
+  try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+  if (phase === 'wash') stroke(e.clientX, e.clientY, e.clientX, e.clientY);
+});
+canvas.addEventListener('pointermove', e => {
+  if (pointer && pointer.down && e.pointerId !== pointer.id) return;
+  const down = !!(pointer && pointer.down);
+  pointer = { x: e.clientX, y: e.clientY, down, id: e.pointerId };
+  if (down && phase === 'wash' && lastStroke) stroke(lastStroke.x, lastStroke.y, e.clientX, e.clientY);
+  lastStroke = { x: e.clientX, y: e.clientY };
+});
+const lift = e => {
+  if (!pointer || e.pointerId !== pointer.id) return;
+  pointer = e.pointerType === 'mouse' ? { ...pointer, down: false } : null;
+  lastStroke = null;
+};
+canvas.addEventListener('pointerup', lift);
+canvas.addEventListener('pointercancel', lift);
+canvas.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse' && pointer && !pointer.down) pointer = null; });
+
+const soundBtn = $('sound');
+const showSound = () => {
+  soundBtn.textContent = Sfx.on ? '🔊' : '🔇';
+  soundBtn.setAttribute('aria-label', Sfx.on ? 'Turn sound off' : 'Turn sound on');
+};
+showSound();
+soundBtn.addEventListener('click', () => { Sfx.start(); Sfx.toggle(); showSound(); });
+$('startBtn').addEventListener('click', startGame);
+
+readTheme();
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', readTheme);
+new MutationObserver(readTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+addEventListener('resize', resize);
+resize();
+// A muddy car waits behind the start screen
+veh = VEHICLES[0]; layoutVehicle(true); paintMud(); mood = 0;
+requestAnimationFrame(frame);
+
+// Install as an app and play offline (only works when served over https or localhost)
+if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+  addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+}
+</script>
+</body>
+</html>
