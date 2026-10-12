@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fish Tank</title>
+<meta name="description" content="A big fish tank. Tap above the water to drop food and watch the fish swim over to eat it.">
+<meta name="theme-color" content="#f3ece2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1b1d33" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Fish Tank">
+<style>
+  :root {
+    --bg: #f3ece2;
+    --hud-bg: rgba(255, 255, 255, 0.82);
+    --hud-fg: #1d3557;
+    --accent: #1fa2ff;
+    --mode: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #1b1d33; --hud-bg: rgba(20, 24, 56, 0.7); --hud-fg: #eaf4ff; --mode: dark; }
+  }
+  :root[data-theme="dark"] { --bg: #1b1d33; --hud-bg: rgba(20, 24, 56, 0.7); --hud-fg: #eaf4ff; --mode: dark; }
+  html, body { height: 100%; margin: 0; overflow: hidden; background: var(--bg); }
+  body {
+    font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+    -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+  }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; display: block; }
+
+  #hud {
+    position: fixed; top: 0; right: 0; display: flex; gap: 8px;
+    padding: calc(env(safe-area-inset-top, 0px) + 12px) calc(env(safe-area-inset-right, 0px) + 14px) 0 0;
+  }
+  #hud button {
+    background: var(--hud-bg); color: var(--hud-fg); border: 0; cursor: pointer;
+    border-radius: 999px; font: 800 18px/1 "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+    padding: 11px 14px; box-shadow: 0 2px 10px rgba(20, 40, 80, 0.12);
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  }
+  #hud button:disabled { opacity: 0.45; cursor: default; }
+  #sound { font-size: 22px; padding: 9px 13px; }
+  #hud button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="Fish tank. Tap above the water to feed the fish."></canvas>
+<div id="hud">
+  <button id="addFish" type="button" aria-label="Add a fish">＋ 🐟</button>
+  <button id="sound" type="button" aria-label="Turn sound off">🔊</button>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const $ = id => document.getElementById(id);
+const TAU = Math.PI * 2;
+const rand = (a, b) => a + Math.random() * (b - a);
+let W, H, dpr, u;          // u: size unit so things scale with the screen
+let tank, waterTop, sandTop;
+let dark = false;
+
+// =====================================================================
+// Sound effects, made on the fly with the Web Audio API
+// =====================================================================
+const Sfx = (() => {
+  let ac = null, master = null, noiseBuf = null;
+  let on = true;
+  try { on = localStorage.getItem('fishtank-sound') !== 'off'; } catch (e) {}
+  function start() {                           // browsers only allow audio after a tap
+    if (ac) { if (ac.state === 'suspended') ac.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    ac = new AC();
+    const comp = ac.createDynamicsCompressor();
+    master = ac.createGain(); master.gain.value = on ? 0.6 : 0;
+    master.connect(comp); comp.connect(ac.destination);
+    noiseBuf = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
+    const d = noiseBuf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  }
+  const ready = () => ac && on && ac.state === 'running';
+  function tone(freq, freqEnd, dur, vol, type = 'sine', delay = 0) {
+    const t = ac.currentTime + delay;
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    if (freqEnd !== freq) o.frequency.exponentialRampToValueAtTime(freqEnd, t + dur);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(master);
+    o.start(t); o.stop(t + dur + 0.05);
+  }
+  function noise(dur, vol, type, f0, f1, delay = 0, q = 1) {
+    const t = ac.currentTime + delay;
+    const src = ac.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+    const f = ac.createBiquadFilter(); f.type = type; f.Q.value = q;
+    f.frequency.setValueAtTime(f0, t);
+    f.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(f); f.connect(g); g.connect(master);
+    src.start(t, Math.random() * 0.5); src.stop(t + dur + 0.05);
+  }
+  return {
+    start,
+    get on() { return on; },
+    toggle() {
+      on = !on;
+      try { localStorage.setItem('fishtank-sound', on ? 'on' : 'off'); } catch (e) {}
+      if (master) master.gain.setTargetAtTime(on ? 0.6 : 0, ac.currentTime, 0.05);
+      return on;
+    },
+    plop() {                                   // food lands in the water
+      if (!ready()) return;
+      const f = rand(600, 900);
+      tone(f, f * 2.2, 0.09, 0.18, 'sine');
+      noise(0.08, 0.06, 'bandpass', 2500, 1000, 0, 2);
+    },
+    nom(size) {                                // a fish eats; small fish sound higher
+      if (!ready()) return;
+      const f = 520 / Math.max(0.4, size) * rand(0.9, 1.1);
+      tone(f, f * 0.6, 0.08, 0.14, 'triangle');
+      tone(f * 1.3, f * 0.8, 0.07, 0.08, 'triangle', 0.09);
+    },
+    blub() {                                   // a bubble rising out of the chest
+      if (!ready()) return;
+      const f = rand(250, 450);
+      tone(f, f * 2.5, 0.12, 0.1, 'sine');
+    },
+    pop() {
+      if (!ready()) return;
+      const f = rand(900, 1400);
+      tone(f, f * 1.8, 0.05, 0.16, 'sine');
+      noise(0.04, 0.12, 'highpass', 3000, 2000);
+    },
+    creak() {                                  // treasure chest lid
+      if (!ready()) return;
+      tone(180, 260, 0.25, 0.08, 'sawtooth');
+    },
+    splash() {
+      if (!ready()) return;
+      noise(0.5, 0.3, 'lowpass', 3000, 300, 0, 0.7);
+      tone(300, 120, 0.25, 0.12, 'sine');
+    },
+    happy() {
+      if (!ready()) return;
+      [784, 988, 1175, 1568].forEach((f, i) => tone(f, f, 0.18, 0.07, 'sine', i * 0.07));
+    },
+    boop() {
+      if (!ready()) return;
+      tone(440, 660, 0.12, 0.1, 'sine');
+    },
+    puff() {
+      if (!ready()) return;
+      tone(200, 500, 0.25, 0.12, 'sine');
+      noise(0.2, 0.08, 'bandpass', 600, 1500, 0, 2);
+    },
+    munch() {                                  // the snail
+      if (!ready()) return;
+      for (let i = 0; i < 3; i++) noise(0.04, 0.08, 'bandpass', 1500, 900, i * 0.12, 4);
+    },
+  };
+})();
+
+// =====================================================================
+// Fish artwork. Each kind is drawn facing right, 100 units long, centered.
+// =====================================================================
+// <fish>
+function fishEye(g, x, y, r, st) {
+  if (st.happy) {
+    g.strokeStyle = '#1d2433'; g.lineWidth = r * 0.45; g.lineCap = 'round';
+    g.beginPath(); g.arc(x, y + r * 0.35, r * 0.75, 1.15 * Math.PI, 1.85 * Math.PI); g.stroke();
+    return;
+  }
+  g.fillStyle = '#ffffff'; g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,0.25)'; g.lineWidth = 1.5; g.stroke();
+  if (st.blink) {
+    g.strokeStyle = '#1d2433'; g.lineWidth = r * 0.4;
+    g.beginPath(); g.moveTo(x - r * 0.8, y); g.lineTo(x + r * 0.8, y); g.stroke();
+    return;
+  }
+  g.fillStyle = '#1d2433'; g.beginPath(); g.arc(x + r * 0.25, y + r * 0.1, r * 0.55, 0, TAU); g.fill();
+  g.fillStyle = '#ffffff'; g.beginPath(); g.arc(x + r * 0.05, y - r * 0.2, r * 0.2, 0, TAU); g.fill();
+}
+function fishMouth(g, x, y, open) {
+  g.fillStyle = '#7a2436';
+  if (open > 0.1) { g.beginPath(); g.ellipse(x, y, 2.5 + open * 3, 2 + open * 4, 0, 0, TAU); g.fill(); }
+  else { g.strokeStyle = '#7a2436'; g.lineWidth = 2; g.beginPath(); g.arc(x - 3, y - 2, 4, 0.1 * Math.PI, 0.6 * Math.PI); g.stroke(); }
+}
+function outlineFill(g, color, line) { g.fillStyle = color; g.fill(); g.strokeStyle = line; g.lineWidth = 3; g.stroke(); }
+function tailFan(g, x, wag, color, line, len = 26, spread = 22) {
+  g.save(); g.translate(x, 0); g.rotate(wag);
+  g.beginPath(); g.moveTo(4, 0); g.lineTo(-len, -spread); g.quadraticCurveTo(-len * 0.6, 0, -len, spread); g.closePath();
+  outlineFill(g, color, line);
+  g.restore();
+}
+
+const KINDS = {
+  clown: { len: 70, speed: 70, draw(g, st) {
+    tailFan(g, -36, st.wag, '#ff7a1a', '#b84a00');
+    g.beginPath(); g.moveTo(-10, -24); g.quadraticCurveTo(8, -44, 26, -22); g.closePath(); outlineFill(g, '#ff7a1a', '#b84a00');
+    g.beginPath(); g.ellipse(4, 0, 44, 25, 0, 0, TAU); outlineFill(g, '#ff7a1a', '#b84a00');
+    g.save(); g.beginPath(); g.ellipse(4, 0, 44, 25, 0, 0, TAU); g.clip();
+    for (const bx of [-24, 6, 32]) {
+      g.fillStyle = '#ffffff'; g.fillRect(bx - 6, -30, 12, 60);
+      g.strokeStyle = '#1d2433'; g.lineWidth = 2.5; g.strokeRect(bx - 6, -30, 12, 60);
+    }
+    g.restore();
+    g.beginPath(); g.ellipse(4, 0, 44, 25, 0, 0, TAU); g.strokeStyle = '#b84a00'; g.lineWidth = 3; g.stroke();
+    fishEye(g, 30, -7, 6.5, st); fishMouth(g, 46, 6, st.mouth);
+  } },
+  tang: { len: 82, speed: 85, draw(g, st) {
+    tailFan(g, -40, st.wag, '#ffd23f', '#b38f00', 24, 24);
+    g.beginPath(); g.moveTo(-34, -20); g.quadraticCurveTo(0, -46, 30, -24); g.closePath(); outlineFill(g, '#2563eb', '#123a91');
+    g.beginPath(); g.moveTo(-34, 20); g.quadraticCurveTo(0, 40, 26, 24); g.closePath(); outlineFill(g, '#2563eb', '#123a91');
+    g.beginPath(); g.ellipse(2, 0, 44, 30, 0, 0, TAU); outlineFill(g, '#2f6bff', '#123a91');
+    g.fillStyle = '#16213d';                                   // the black swoosh
+    g.beginPath(); g.moveTo(-36, -4); g.quadraticCurveTo(-10, -26, 22, -14); g.quadraticCurveTo(0, -10, -6, 6);
+    g.quadraticCurveTo(-20, 20, -36, 12); g.quadraticCurveTo(-28, 4, -36, -4); g.fill();
+    g.beginPath(); g.ellipse(10, 10, 9, 5, 0.4, 0, TAU); g.fillStyle = '#ffd23f'; g.fill();
+    fishEye(g, 30, -8, 6.5, st); fishMouth(g, 45, 5, st.mouth);
+  } },
+  angel: { len: 72, speed: 55, draw(g, st) {
+    tailFan(g, -30, st.wag, '#f3e7b0', '#a8945a', 24, 20);
+    g.beginPath(); g.moveTo(-26, -8); g.quadraticCurveTo(-30, -60, -8, -72); g.quadraticCurveTo(6, -40, 14, -22); g.closePath(); outlineFill(g, '#f3e7b0', '#a8945a');
+    g.beginPath(); g.moveTo(-26, 8); g.quadraticCurveTo(-30, 60, -8, 72); g.quadraticCurveTo(6, 40, 14, 22); g.closePath(); outlineFill(g, '#f3e7b0', '#a8945a');
+    g.beginPath(); g.moveTo(44, 2); g.quadraticCurveTo(24, -36, -10, -30); g.quadraticCurveTo(-34, -20, -32, 0);
+    g.quadraticCurveTo(-34, 20, -10, 30); g.quadraticCurveTo(24, 36, 44, 2); g.closePath(); outlineFill(g, '#f7efc8', '#a8945a');
+    g.save(); g.clip();
+    g.fillStyle = 'rgba(40, 40, 50, 0.55)';
+    for (const bx of [-18, 2, 22]) g.fillRect(bx - 4, -80, 8, 160);
+    g.restore();
+    fishEye(g, 26, -6, 6, st); fishMouth(g, 42, 4, st.mouth);
+  } },
+  gold: { len: 76, speed: 60, draw(g, st) {
+    // Flowing double tail
+    g.save(); g.translate(-30, 0); g.rotate(st.wag * 1.3);
+    for (const sy of [-1, 1]) {
+      g.beginPath(); g.moveTo(4, 0); g.quadraticCurveTo(-20, sy * 8, -36, sy * 30); g.quadraticCurveTo(-26, sy * 8, -40, sy * 4); g.closePath();
+      outlineFill(g, 'rgba(255, 170, 60, 0.9)', '#c96a00');
+    }
+    g.restore();
+    g.beginPath(); g.moveTo(-14, -24); g.quadraticCurveTo(0, -46, 20, -24); g.closePath(); outlineFill(g, '#ffae3b', '#c96a00');
+    g.beginPath(); g.ellipse(6, 0, 38, 27, 0, 0, TAU); outlineFill(g, '#ff9f1c', '#c96a00');
+    g.beginPath(); g.ellipse(10, 10, 24, 12, 0, 0, TAU); g.fillStyle = 'rgba(255, 230, 160, 0.7)'; g.fill();
+    fishEye(g, 28, -7, 7, st); fishMouth(g, 43, 5, st.mouth);
+  } },
+  puffer: { len: 62, speed: 45, draw(g, st) {
+    const p = 1 + st.puff * 0.45, r = 32 * p;
+    tailFan(g, -r + 2, st.wag, '#e8c14a', '#9a7a14', 18, 14);
+    if (st.puff > 0.05) {                                     // spikes pop out when puffed
+      g.fillStyle = '#c99b1c';
+      for (let i = 0; i < 18; i++) {
+        const a = i * TAU / 18, s = 6 + st.puff * 6;
+        g.beginPath(); g.moveTo(Math.cos(a - 0.12) * r, Math.sin(a - 0.12) * r); g.lineTo(Math.cos(a) * (r + s), Math.sin(a) * (r + s));
+        g.lineTo(Math.cos(a + 0.12) * r, Math.sin(a + 0.12) * r); g.fill();
+      }
+    }
+    g.beginPath(); g.arc(0, 0, r, 0, TAU); outlineFill(g, '#f5d35c', '#9a7a14');
+    g.beginPath(); g.ellipse(2, r * 0.45, r * 0.75, r * 0.45, 0, 0, TAU); g.fillStyle = '#fff4cf'; g.fill();
+    g.fillStyle = 'rgba(140, 100, 20, 0.45)';
+    for (const [sx, sy] of [[-14, -14], [-2, -22], [-20, 2], [6, -10], [-10, -4]]) { g.beginPath(); g.arc(sx * p, sy * p, 3.5, 0, TAU); g.fill(); }
+    fishEye(g, r * 0.5, -r * 0.25, 8, st); fishMouth(g, r - 2, r * 0.18, st.mouth);
+  } },
+  neon: { len: 34, speed: 95, draw(g, st) {
+    tailFan(g, -40, st.wag, 'rgba(220, 230, 255, 0.7)', 'rgba(120,140,180,0.8)', 20, 14);
+    g.beginPath(); g.ellipse(0, 0, 46, 15, 0, 0, TAU); outlineFill(g, '#dfe7f2', '#7d8aa3');
+    g.save(); g.beginPath(); g.ellipse(0, 0, 46, 15, 0, 0, TAU); g.clip();
+    g.fillStyle = '#ff3d5a'; g.fillRect(-46, 2, 50, 20);
+    g.fillStyle = '#22d3ee'; g.fillRect(-46, -6, 92, 7);
+    g.restore();
+    fishEye(g, 30, -3, 7, st); fishMouth(g, 44, 3, st.mouth);
+  } },
+};
+// </fish>
+
+// =====================================================================
+// Layout
+// =====================================================================
+function readTheme() { dark = getComputedStyle(document.documentElement).getPropertyValue('--mode').trim() === 'dark'; }
+
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const oldW = W, oldH = H;
+  W = innerWidth; H = innerHeight;
+  canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+  const hudBottom = $('hud').getBoundingClientRect().bottom;
+  // Space above the tank is where you tap to drop food
+  const feedZone = Math.max(70, H * 0.12);
+  tank = { x: 10, y: Math.max(hudBottom + 8, feedZone), w: W - 20 };
+  tank.h = H - tank.y - 10;
+  waterTop = tank.y + 18;
+  sandTop = tank.y + tank.h - Math.max(36, tank.h * 0.13);
+  u = Math.max(0.65, Math.min(1.6, Math.min(W * 1.3, tank.h) / 560));
+  layoutDecor();
+  // Keep everything inside the tank if the screen changed size
+  if (oldW) for (const f of fishes) { f.x = f.x / oldW * W; f.y = Math.min(f.y / oldH * H, sandTop - 20); }
+}
+
+// =====================================================================
+// Tank decorations: plants, rocks, treasure chest, snail
+// =====================================================================
+let plants = [], rocks = [], pebbles = [];
+const chest = { x: 0, y: 0, w: 0, h: 0, open: 0, openT: 0, bubbleT: 0, toEmit: 0 };
+const snail = { x: 0, dir: 1, target: null, munchT: 0, wanderT: 0 };
+function layoutDecor() {
+  let seed = 7; const r = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  plants = [];
+  const n = Math.max(4, Math.round(tank.w / 120));
+  for (let i = 0; i < n; i++) {
+    plants.push({ x: tank.x + tank.w * (i + 0.3 + r() * 0.4) / n, h: (tank.h * 0.25 + r() * tank.h * 0.3), blades: 2 + (r() * 3 | 0),
+                  hue: r() < 0.7 ? 130 + r() * 30 : 95, ph: r() * TAU });
+  }
+  rocks = [];
+  for (let i = 0; i < 3; i++) rocks.push({ x: tank.x + tank.w * (0.15 + i * 0.33 + r() * 0.1), r: (24 + r() * 26) * u, c: ['#8d8a99', '#a39b8b', '#7c8596'][i] });
+  pebbles = [];
+  for (let i = 0; i < tank.w / 7; i++) pebbles.push({ x: tank.x + r() * tank.w, y: sandTop + 6 + r() * (tank.y + tank.h - sandTop - 10), r: 1.5 + r() * 3,
+                                                     c: ['#e6c98f', '#d9b779', '#f2dcaa', '#c9a568', '#b9b1a3'][i % 5] });
+  chest.w = Math.max(64, Math.min(120, tank.w * 0.16)); chest.h = chest.w * 0.68;
+  chest.x = tank.x + tank.w * 0.62 - chest.w / 2; chest.y = sandTop + 8 - chest.h;
+  if (!snail.x) snail.x = tank.x + tank.w * 0.3;
+}
+
+// =====================================================================
+// Fish behavior
+// =====================================================================
+const fishes = [], pellets = [], bubbles = [], fx = [];
+const schools = [];
+const MAX_FISH = 16;
+let fedCount = 0, hintAlpha = 1;
+
+function makeFish(kind, x, y, school = null) {
+  const k = KINDS[kind];
+  return { kind, x, y, vx: rand(-20, 20), vy: 0, face: Math.random() < 0.5 ? -1 : 1, dir: 1,
+           size: (kind === 'neon' ? rand(0.9, 1.1) : rand(0.9, 1.1)), grow: 1, hunger: rand(0.6, 1), plump: 0,
+           happyT: 0, loopT: 0, wiggleT: 0, puff: 0, mouth: 0, blinkIn: rand(1, 4), blinkT: 0,
+           target: null, wanderT: 0, lookT: 0, look: null, ph: rand(0, TAU), school,
+           len: k.len, speed: k.speed, off: school ? { x: rand(-40, 40), y: rand(-26, 26) } : null };
+}
+const fishLen = f => f.len * f.size * f.grow * u;
+
+function addSchool(n, x, y) {
+  const s = { target: { x, y }, wanderT: 0 };
+  schools.push(s);
+  for (let i = 0; i < n; i++) fishes.push(makeFish('neon', x + rand(-40, 40) * u, y + rand(-30, 30) * u, s));
+}
+
+function randomSpot() {
+  return { x: rand(tank.x + 50 * u, tank.x + tank.w - 50 * u), y: rand(waterTop + 40 * u, sandTop - 40 * u) };
+}
+
+function updateFish(f, dt, t) {
+  const L = fishLen(f);
+  f.hunger = Math.min(1, f.hunger + dt / 45);              // gets hungry again slowly
+  f.plump = Math.max(0, f.plump - dt / 25);
+  f.happyT -= dt; f.wiggleT -= dt; f.lookT -= dt;
+  f.puff = Math.max(0, f.puff - dt * 0.5);
+  f.mouth = Math.max(0, f.mouth - dt * 4);
+  f.blinkIn -= dt; f.blinkT -= dt;
+  if (f.blinkIn <= 0) { f.blinkT = 0.12; f.blinkIn = rand(2, 5); }
+  if (f.loopT > 0) f.loopT -= dt;
+
+  // Pick what to swim toward: food first (if hungry), then a curious look, then wandering
+  let goal = null, urgent = false, eatTarget = null, curious = false;
+  if (f.hunger > 0.35) {                                   // full fish leave food for the snail
+    let best = Infinity;
+    for (const p of pellets) {
+      if (p.state !== 'water') continue;
+      const d = Math.hypot(p.x - f.x, p.y - f.y);
+      if (d < best) { best = d; eatTarget = p; }
+    }
+    if (eatTarget) { goal = { x: eatTarget.x - f.face * L * 0.42, y: eatTarget.y }; urgent = true; }
+  }
+  if (!goal && f.lookT > 0 && f.look) {
+    const side = f.x < f.look.x ? -1 : 1;
+    goal = { x: f.look.x + side * L * 0.8, y: f.look.y }; curious = true;
+  }
+  if (!goal && f.school) {
+    const s = f.school;
+    goal = { x: s.target.x + f.off.x * u, y: s.target.y + f.off.y * u };
+  }
+  if (!goal) {
+    f.wanderT -= dt;
+    if (!f.target || f.wanderT <= 0 || Math.hypot(f.target.x - f.x, f.target.y - f.y) < L * 0.5) {
+      f.target = randomSpot(); f.wanderT = rand(3, 7);
+    }
+    goal = f.target;
+  }
+
+  // Steer: swim toward the goal, slowing down when close
+  const dx = goal.x - f.x, dy = goal.y - f.y, d = Math.hypot(dx, dy) || 1;
+  const max = f.speed * u * (urgent ? 1.9 : curious ? 1.5 : 1) * (f.hunger < 0.1 ? 0.8 : 1);
+  const want = Math.min(max, d * 1.8);
+  const ax = (dx / d) * want - f.vx, ay = (dy / d) * want - f.vy;
+  const k = urgent ? 3 : 1.5;
+  f.vx += ax * k * dt; f.vy += ay * k * dt * 0.8;
+  // Gentle bob
+  f.vy += Math.sin(t * 1.3 + f.ph) * 6 * u * dt;
+  // Stay in the water, away from the glass and sand
+  const m = L * 0.55;
+  if (f.x < tank.x + m) f.vx += (tank.x + m - f.x) * 4 * dt;
+  if (f.x > tank.x + tank.w - m) f.vx -= (f.x - (tank.x + tank.w - m)) * 4 * dt;
+  if (f.y < waterTop + L * 0.3) f.vy += (waterTop + L * 0.3 - f.y) * 4 * dt;
+  if (f.y > sandTop - L * 0.35) f.vy -= (f.y - (sandTop - L * 0.35)) * 4 * dt;
+  f.x += f.vx * dt; f.y += f.vy * dt;
+  f.x = Math.max(tank.x + 4, Math.min(tank.x + tank.w - 4, f.x));
+  f.y = Math.max(waterTop + 4, Math.min(sandTop - 4, f.y));
+  // Turn to face where it's going (smoothly flips through side-on)
+  if (Math.abs(f.vx) > 6 * u) f.dir = Math.sign(f.vx);
+  if (eatTarget) f.dir = Math.sign(eatTarget.x - f.x) || f.dir;
+  f.face += (f.dir - f.face) * Math.min(1, dt * 6);
+
+  // Eat a pellet that's at the mouth
+  if (eatTarget) {
+    const mx = f.x + f.face * L * 0.45, my = f.y;
+    if (Math.hypot(eatTarget.x - mx, eatTarget.y - my) < 10 * u + L * 0.18) f.mouth = 1;
+    if (Math.hypot(eatTarget.x - mx, eatTarget.y - my) < 6 * u + L * 0.12) eat(f, eatTarget);
+  }
+}
+
+function eat(f, p) {
+  p.state = 'eaten';
+  f.mouth = 1;
+  f.hunger = Math.max(0, f.hunger - 0.34);
+  f.plump = Math.min(1, f.plump + 0.4);
+  f.grow = Math.min(1.35, f.grow + 0.03);                  // each pellet: a tiny bit bigger, up to a limit
+  Sfx.nom(f.len / 70 * f.size * f.grow);
+  for (let i = 0; i < 3; i++) bubbles.push(makeBubble(f.x + f.face * fishLen(f) * 0.5, f.y - 4, rand(2, 4) * u, false));
+  if (f.hunger < 0.15 && f.happyT <= 0) {
+    // Full and happy: a little loop-the-loop and sparkles
+    f.happyT = 6; f.loopT = 1.1;
+    Sfx.happy();
+    for (let i = 0; i < 10; i++) fx.push({ kind: 'spark', x: f.x + rand(-30, 30) * u, y: f.y + rand(-25, 25) * u, life: 1, r: rand(4, 8) * u, rot: rand(0, TAU) });
+  }
+}
+
+// Fish gently push apart so a crowd around the food doesn't pile up on top of each other
+function separate(dt) {
+  for (let i = 0; i < fishes.length; i++) {
+    const a = fishes[i], la = fishLen(a);
+    for (let j = i + 1; j < fishes.length; j++) {
+      const b = fishes[j], lb = fishLen(b);
+      const dx = b.x - a.x, dy = (b.y - a.y) * 1.6, d = Math.hypot(dx, dy) || 0.01;
+      const want = (la + lb) * (a.school && a.school === b.school ? 0.3 : 0.42);
+      if (d < want) {
+        const push = (want - d) * 3 * dt, nx = dx / d, ny = dy / d;
+        a.vx -= nx * push * 60; a.vy -= ny * push * 40;
+        b.vx += nx * push * 60; b.vy += ny * push * 40;
+      }
+    }
+  }
+}
+
+function updateSchools(dt) {
+  for (const s of schools) {
+    // Hungry neon fish break off to eat; the school's wander point moves around
+    s.wanderT -= dt;
+    if (s.wanderT <= 0) { s.target = randomSpot(); s.wanderT = rand(4, 8); }
+  }
+}
+
+// =====================================================================
+// Food, bubbles, snail, chest
+// =====================================================================
+function dropFood(x) {
+  x = Math.max(tank.x + 20, Math.min(tank.x + tank.w - 20, x));
+  const n = 3;
+  for (let i = 0; i < n; i++) {
+    pellets.push({ x: x + rand(-10, 10) * u, y: tank.y - rand(20, 40), vy: rand(0, 60), state: 'air', ph: rand(0, TAU), r: rand(3.5, 5) * u,
+                   c: ['#c2703d', '#d9944a', '#a35a2c'][i % 3], restT: 0 });
+  }
+  fedCount++;
+}
+
+function makeBubble(x, y, r, tappable = true) {
+  return { x, y, r, vy: -rand(40, 70) * u, ph: rand(0, TAU), tappable };
+}
+
+function updatePellets(dt, t) {
+  for (let i = pellets.length - 1; i >= 0; i--) {
+    const p = pellets[i];
+    if (p.state === 'air') {
+      p.vy += 900 * dt; p.y += p.vy * dt;
+      if (p.y >= waterTop) {
+        p.state = 'water'; p.vy = 40 * u;
+        Sfx.plop();
+        fx.push({ kind: 'ring', x: p.x, y: waterTop, life: 1, r: 4 * u });
+      }
+    } else if (p.state === 'water') {
+      p.vy += ((sandTop - waterTop) / 10 - p.vy) * dt * 2;    // slows to a gentle sink: ~10 s to the bottom
+      p.y += p.vy * dt;
+      p.x += Math.sin(t * 2 + p.ph) * 10 * u * dt;
+      if (p.y >= sandTop + 4) { p.y = sandTop + 4; p.state = 'sand'; }
+    } else if (p.state === 'sand') {
+      p.restT += dt;
+    }
+    if (p.state === 'eaten') pellets.splice(i, 1);
+  }
+}
+
+function updateSnail(dt, t) {
+  // The snail crawls along the sand to tidy up any food that sank
+  const speed = 16 * u;
+  snail.wanderT -= dt;
+  if (snail.munchT > 0) { snail.munchT -= dt; return; }
+  let tgt = null, best = Infinity;
+  for (const p of pellets) if (p.state === 'sand') { const d = Math.abs(p.x - snail.x); if (d < best) { best = d; tgt = p; } }
+  let gx;
+  if (tgt) gx = tgt.x;
+  else {
+    if (snail.target == null || snail.wanderT <= 0 || Math.abs(snail.target - snail.x) < 4) { snail.target = rand(tank.x + 40, tank.x + tank.w - 40); snail.wanderT = rand(6, 14); }
+    gx = snail.target;
+  }
+  const dx = gx - snail.x;
+  if (Math.abs(dx) > 2) { snail.dir = Math.sign(dx); snail.x += snail.dir * Math.min(Math.abs(dx), speed * (tgt ? 1.6 : 1) * dt); }
+  if (tgt && Math.abs(tgt.x - (snail.x + snail.dir * 16 * u)) < 10 * u) {
+    tgt.state = 'eaten'; snail.munchT = 0.8; Sfx.munch();
+  }
+}
+
+function updateChest(dt) {
+  chest.openT -= dt;
+  const want = chest.openT > 0 ? 1 : 0;
+  chest.open += (want - chest.open) * Math.min(1, dt * 8);
+  if (chest.toEmit > 0) {
+    chest.bubbleT -= dt;
+    if (chest.bubbleT <= 0) {
+      chest.bubbleT = 0.07;
+      chest.toEmit--;
+      bubbles.push(makeBubble(chest.x + chest.w * rand(0.3, 0.7), chest.y + chest.h * 0.3, rand(6, 15) * u));
+      if (chest.toEmit % 3 === 0) Sfx.blub();
+    }
+  }
+}
+
+function updateBubbles(dt, t) {
+  for (let i = bubbles.length - 1; i >= 0; i--) {
+    const b = bubbles[i];
+    b.y += b.vy * dt; b.x += Math.sin(t * 3 + b.ph) * 14 * u * dt;
+    if (b.y - b.r < waterTop) { bubbles.splice(i, 1); fx.push({ kind: 'ring', x: b.x, y: waterTop, life: 0.6, r: b.r * 0.5 }); }
+  }
+  for (let i = fx.length - 1; i >= 0; i--) {
+    const f = fx[i];
+    f.life -= dt * (f.kind === 'spark' ? 1.2 : 1.6);
+    if (f.kind === 'ring') f.r += 30 * u * dt;
+    if (f.kind === 'spark') f.y -= 15 * u * dt;
+    if (f.kind === 'splash') { f.vy += 700 * dt; f.x += f.vx * dt; f.y += f.vy * dt; }
+    if (f.life <= 0) fx.splice(i, 1);
+  }
+}
+
+// =====================================================================
+// Drawing
+// =====================================================================
+function drawRoom() {
+  ctx.fillStyle = dark ? '#1b1d33' : '#f3ece2';
+  ctx.fillRect(0, 0, W, H);
+  // Feeding hint above the water
+  if (hintAlpha > 0.01) {
+    ctx.save();
+    ctx.globalAlpha = hintAlpha * (0.75 + 0.25 * Math.sin(performance.now() / 300));
+    ctx.fillStyle = dark ? '#eaf4ff' : '#1d3557';
+    const fsz = Math.max(16, Math.min(24, W / 22));
+    ctx.font = `800 ${fsz}px "Trebuchet MS", system-ui, sans-serif`;
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    const y = Math.max(28, tank.y - Math.max(24, (tank.y - 8) * 0.45));
+    ctx.fillText('👆 Tap up here to feed the fish!', 16, y);
+    ctx.restore();
+  }
+}
+
+function drawTankBack(t) {
+  const { x, y, w, h } = tank;
+  ctx.save();
+  rrPath(x, y, w, h, 18); ctx.clip();
+  // Water
+  const water = ctx.createLinearGradient(0, waterTop, 0, sandTop);
+  if (dark) { water.addColorStop(0, '#1f6fa8'); water.addColorStop(1, '#0d2f5c'); }
+  else      { water.addColorStop(0, '#7fd3f7'); water.addColorStop(1, '#2a8bd0'); }
+  ctx.fillStyle = dark ? '#283055' : '#dff3fb'; ctx.fillRect(x, y, w, waterTop - y);   // air gap under the lid
+  ctx.fillStyle = water; ctx.fillRect(x, waterTop, w, h);
+  // Light rays from the top
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 5; i++) {
+    const rx = x + w * (0.1 + i * 0.2) + Math.sin(t * 0.3 + i) * 30;
+    const grad = ctx.createLinearGradient(0, waterTop, 0, sandTop);
+    grad.addColorStop(0, dark ? 'rgba(120,180,255,0.08)' : 'rgba(255,255,255,0.18)'); grad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.moveTo(rx - 20, waterTop); ctx.lineTo(rx + 20, waterTop); ctx.lineTo(rx + 90, sandTop); ctx.lineTo(rx + 10, sandTop); ctx.closePath(); ctx.fill();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+  // Water surface
+  ctx.strokeStyle = dark ? 'rgba(160,210,255,0.6)' : 'rgba(255,255,255,0.85)'; ctx.lineWidth = 3;
+  ctx.beginPath();
+  for (let sx = x; sx <= x + w; sx += 8) { const sy = waterTop + Math.sin(sx * 0.03 + t * 2) * 2; sx === x ? ctx.moveTo(sx, sy) : ctx.lineTo(sx, sy); }
+  ctx.stroke();
+  // Plants swaying
+  for (const p of plants) {
+    for (let b = 0; b < p.blades; b++) {
+      const bx = p.x + (b - p.blades / 2) * 10 * u, bh = p.h * (0.7 + 0.3 * ((b * 37) % 10) / 10);
+      ctx.strokeStyle = `hsl(${p.hue}, 55%, ${dark ? 30 : 38}%)`; ctx.lineWidth = 9 * u; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(bx, sandTop + 10);
+      const sway = Math.sin(t * 0.9 + p.ph + b) * 18 * u;
+      ctx.bezierCurveTo(bx + sway * 0.3, sandTop - bh * 0.35, bx - sway * 0.6, sandTop - bh * 0.7, bx + sway, sandTop - bh);
+      ctx.stroke();
+    }
+  }
+  // Sand and pebbles
+  ctx.fillStyle = dark ? '#8a7650' : '#ecd29b';
+  ctx.beginPath(); ctx.moveTo(x, y + h);
+  for (let sx = x; sx <= x + w + 10; sx += 20) ctx.lineTo(sx, sandTop + Math.sin(sx * 0.012) * 6);
+  ctx.lineTo(x + w, y + h); ctx.closePath(); ctx.fill();
+  for (const p of pebbles) { ctx.fillStyle = p.c; ctx.globalAlpha = dark ? 0.6 : 1; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, TAU); ctx.fill(); }
+  ctx.globalAlpha = 1;
+  for (const r of rocks) {
+    ctx.fillStyle = r.c; ctx.beginPath(); ctx.ellipse(r.x, sandTop + 8, r.r * 1.3, r.r, 0, Math.PI, 0); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.beginPath(); ctx.ellipse(r.x - r.r * 0.4, sandTop + 8 - r.r * 0.6, r.r * 0.35, r.r * 0.15, -0.4, 0, TAU); ctx.fill();
+  }
+  drawChest();
+  ctx.restore();
+}
+
+function rrPath(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
+}
+
+function drawChest() {
+  const { x, y, w, h } = chest;
+  const line = '#5a3311';
+  // Base
+  ctx.fillStyle = '#9b5a22'; ctx.strokeStyle = line; ctx.lineWidth = 3;
+  rrPath(x, y + h * 0.35, w, h * 0.65, 6); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#e0a82e'; ctx.fillRect(x + w * 0.12, y + h * 0.35, w * 0.08, h * 0.65); ctx.fillRect(x + w * 0.8, y + h * 0.35, w * 0.08, h * 0.65);
+  // Gold glow inside when open
+  if (chest.open > 0.05) {
+    ctx.fillStyle = `rgba(255, 215, 80, ${0.85 * chest.open})`;
+    ctx.beginPath(); ctx.ellipse(x + w / 2, y + h * 0.37, w * 0.42, h * 0.1, 0, 0, TAU); ctx.fill();
+  }
+  // Lid, hinged at the back
+  ctx.save();
+  ctx.translate(x, y + h * 0.37); ctx.rotate(-chest.open * 1.1);
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -h * 0.15); ctx.quadraticCurveTo(w / 2, -h * 0.55, w, -h * 0.15); ctx.lineTo(w, 0); ctx.closePath();
+  ctx.fillStyle = '#a8642a'; ctx.fill(); ctx.strokeStyle = line; ctx.lineWidth = 3; ctx.stroke();
+  ctx.fillStyle = '#e0a82e'; ctx.fillRect(w * 0.12, -h * 0.3, w * 0.08, h * 0.3); ctx.fillRect(w * 0.8, -h * 0.3, w * 0.08, h * 0.3);
+  ctx.restore();
+  ctx.fillStyle = '#ffd23f'; rrPath(x + w * 0.44, y + h * 0.32, w * 0.12, h * 0.16, 3); ctx.fill();
+}
+
+function drawSnail(t) {
+  const sx = snail.x, sy = sandTop + 6, s = u * 0.9, d = snail.dir;
+  ctx.save(); ctx.translate(sx, sy); ctx.scale(d * s, s);
+  const munch = snail.munchT > 0 ? Math.sin(t * 25) * 2 : 0;
+  // Body
+  ctx.fillStyle = '#c9b38a'; ctx.strokeStyle = '#8a7350'; ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.moveTo(-26, 0); ctx.quadraticCurveTo(-28, -8, -10, -8); ctx.lineTo(14, -10); ctx.quadraticCurveTo(26, -12, 24 + munch, 0); ctx.closePath(); ctx.fill(); ctx.stroke();
+  // Eye stalks
+  ctx.beginPath(); ctx.moveTo(16, -10); ctx.lineTo(20, -26); ctx.moveTo(20, -10); ctx.lineTo(28, -24); ctx.stroke();
+  for (const [ex, ey] of [[20, -27], [28, -25]]) {
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(ex, ey, 3.5, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#1d2433'; ctx.beginPath(); ctx.arc(ex + 1, ey, 1.8, 0, TAU); ctx.fill();
+  }
+  // Shell
+  ctx.fillStyle = '#e07a5f'; ctx.strokeStyle = '#9c4a33';
+  ctx.beginPath(); ctx.arc(-4, -18, 15, 0, TAU); ctx.fill(); ctx.stroke();
+  ctx.beginPath();
+  for (let a = 0; a < TAU * 2.2; a += 0.2) { const r = 13 - a * 1.7; ctx.lineTo(-4 + Math.cos(a) * r, -18 + Math.sin(a) * r); }
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawFish(f, t) {
+  const L = fishLen(f);
+  const k = KINDS[f.kind];
+  ctx.save();
+  ctx.translate(f.x, f.y);
+  // Tilt toward where it's swimming; a loop-the-loop when happy; a wiggle when tapped
+  let rot = Math.atan2(f.vy, Math.abs(f.vx) + 20) * 0.6 * Math.sign(f.face || 1);
+  if (f.loopT > 0) rot += (1 - f.loopT / 1.1) * TAU * Math.sign(f.face || 1);
+  if (f.wiggleT > 0) rot += Math.sin(f.wiggleT * 30) * 0.25 * Math.min(1, f.wiggleT * 2);
+  ctx.rotate(rot);
+  ctx.scale(f.face * L / 100, L / 100 * (1 + f.plump * 0.12));
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  const speed = Math.hypot(f.vx, f.vy) / (f.speed * u);
+  const wag = Math.sin(t * (6 + speed * 8) + f.ph) * (0.25 + speed * 0.2);
+  k.draw(ctx, { wag, mouth: f.mouth, happy: f.happyT > 0 && f.happyT < 5.5 && f.mouth < 0.2, blink: f.blinkT > 0, puff: f.puff });
+  ctx.restore();
+  // A few sparkles around happy fish
+  if (f.happyT > 0 && Math.random() < 0.06) fx.push({ kind: 'spark', x: f.x + rand(-L, L) * 0.6, y: f.y + rand(-L, L) * 0.4, life: 0.8, r: rand(3, 6) * u, rot: rand(0, TAU) });
+}
+
+// inAir: pellets still falling toward the water (drawn over the tank lid); otherwise the ones in the tank
+function drawPellets(inAir) {
+  for (const p of pellets) {
+    if ((p.state === 'air') !== inAir) continue;
+    ctx.fillStyle = p.c;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.beginPath(); ctx.arc(p.x - p.r * 0.3, p.y - p.r * 0.3, p.r * 0.35, 0, TAU); ctx.fill();
+  }
+}
+
+function drawBubbles() {
+  for (const b of bubbles) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = Math.max(1.2, b.r * 0.12);
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, TAU); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.beginPath(); ctx.arc(b.x - b.r * 0.35, b.y - b.r * 0.35, b.r * 0.22, 0, TAU); ctx.fill();
+  }
+  for (const f of fx) {
+    ctx.save(); ctx.globalAlpha = Math.max(0, f.life);
+    if (f.kind === 'ring') {
+      ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.ellipse(f.x, f.y, f.r, f.r * 0.35, 0, 0, TAU); ctx.stroke();
+    } else if (f.kind === 'look') {
+      ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(f.x, f.y, (1 - f.life) * 40 * u + 6, 0, TAU); ctx.stroke();
+    } else if (f.kind === 'splash') {
+      ctx.fillStyle = 'rgba(200,235,255,0.9)'; ctx.beginPath(); ctx.arc(f.x, f.y, f.r, 0, TAU); ctx.fill();
+    } else {
+      ctx.translate(f.x, f.y); ctx.rotate(f.rot);
+      ctx.fillStyle = '#fff6b0';
+      ctx.beginPath();
+      for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4, r = i % 2 ? f.r * 0.3 : f.r; ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+function drawTankFront() {
+  const { x, y, w, h } = tank;
+  // Glass shine and frame
+  ctx.save(); rrPath(x, y, w, h, 18); ctx.clip();
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  ctx.beginPath(); ctx.moveTo(x + w * 0.05, y); ctx.lineTo(x + w * 0.12, y); ctx.lineTo(x + w * 0.02, y + h); ctx.lineTo(x - w * 0.05, y + h); ctx.closePath(); ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle = dark ? '#3c4570' : '#5b6b82'; ctx.lineWidth = 8;
+  rrPath(x, y, w, h, 18); ctx.stroke();
+  ctx.fillStyle = dark ? '#3c4570' : '#5b6b82';
+  rrPath(x - 4, y - 8, w + 8, 14, 7); ctx.fill();                           // lid rim
+}
+
+// =====================================================================
+// Main loop
+// =====================================================================
+let last = performance.now();
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min((now - last) / 1000, 0.05);
+  last = now;
+  const t = now / 1000;
+  updateSchools(dt);
+  separate(dt);
+  for (const f of fishes) updateFish(f, dt, t);
+  updatePellets(dt, t);
+  updateSnail(dt, t);
+  updateChest(dt);
+  updateBubbles(dt, t);
+  if (fedCount > 0) hintAlpha = Math.max(0, hintAlpha - dt * 1.5);
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  drawRoom();
+  drawTankBack(t);
+  ctx.save(); rrPath(tank.x, tank.y, tank.w, tank.h, 18); ctx.clip();
+  drawSnail(t);
+  drawPellets(false);
+  // Small fish behind big ones
+  const order = fishes.slice().sort((a, b) => a.len * a.size - b.len * b.size);
+  for (const f of order) drawFish(f, t);
+  drawBubbles();
+  ctx.restore();
+  drawPellets(true);                                          // food still falling above the tank
+  drawTankFront();
+}
+
+// =====================================================================
+// Input
+// =====================================================================
+canvas.addEventListener('pointerdown', e => {
+  Sfx.start();
+  const x = e.clientX, y = e.clientY;
+  // Above the water: drop food
+  if (y < waterTop) { dropFood(x); return; }
+  // Pop a bubble
+  for (let i = bubbles.length - 1; i >= 0; i--) {
+    const b = bubbles[i];
+    if (b.tappable && Math.hypot(b.x - x, b.y - y) < b.r + 14) {
+      bubbles.splice(i, 1); Sfx.pop();
+      fx.push({ kind: 'ring', x: b.x, y: b.y, life: 0.5, r: b.r });
+      for (let k = 0; k < 6; k++) fx.push({ kind: 'spark', x: b.x + rand(-1, 1) * b.r, y: b.y + rand(-1, 1) * b.r, life: 0.5, r: 3 * u, rot: 0 });
+      return;
+    }
+  }
+  // Open the treasure chest
+  if (x > chest.x - 10 && x < chest.x + chest.w + 10 && y > chest.y - chest.h * 0.3 && y < chest.y + chest.h + 10) {
+    if (chest.openT <= 0) Sfx.creak();
+    chest.openT = 2.2; chest.toEmit = 16;
+    return;
+  }
+  // Tap a fish: it wiggles (the pufferfish puffs up!)
+  for (let i = fishes.length - 1; i >= 0; i--) {
+    const f = fishes[i], L = fishLen(f);
+    if (Math.abs(x - f.x) < L * 0.55 && Math.abs(y - f.y) < L * 0.4 + 6) {
+      f.wiggleT = 0.7;
+      if (f.kind === 'puffer') { f.puff = 1; Sfx.puff(); } else Sfx.boop();
+      return;
+    }
+  }
+  // Tap the water: nearby fish come over to look
+  fx.push({ kind: 'look', x, y, life: 1 });
+  const near = fishes.slice().sort((a, b) => Math.hypot(a.x - x, a.y - y) - Math.hypot(b.x - x, b.y - y)).slice(0, 3);
+  for (const f of near) { f.lookT = 3.5; f.look = { x, y }; }
+  for (const s of schools) if (Math.hypot(s.target.x - x, s.target.y - y) < W * 0.5) { s.target = { x, y }; s.wanderT = 2.5; }
+});
+
+const addBtn = $('addFish');
+function countFish() { addBtn.disabled = fishes.length >= MAX_FISH; }
+addBtn.addEventListener('click', () => {
+  Sfx.start();
+  if (fishes.length >= MAX_FISH) return;
+  // A random new fish drops in with a splash
+  const kinds = ['clown', 'tang', 'angel', 'gold', 'puffer', 'neon'];
+  const kind = kinds[Math.random() * kinds.length | 0];
+  const x = rand(tank.x + 60, tank.x + tank.w - 60);
+  if (kind === 'neon' && fishes.length <= MAX_FISH - 3) addSchool(3, x, waterTop + 40 * u);
+  else {
+    const f = makeFish(kind === 'neon' ? 'clown' : kind, x, waterTop + 10);
+    f.vy = 160 * u; f.hunger = 1;
+    fishes.push(f);
+  }
+  Sfx.splash();
+  for (let i = 0; i < 14; i++) fx.push({ kind: 'splash', x, y: waterTop, vx: rand(-120, 120), vy: rand(-260, -120), life: 0.8, r: rand(2, 4) * u });
+  fx.push({ kind: 'ring', x, y: waterTop, life: 1, r: 10 * u });
+  countFish();
+});
+
+const soundBtn = $('sound');
+const showSound = () => {
+  soundBtn.textContent = Sfx.on ? '🔊' : '🔇';
+  soundBtn.setAttribute('aria-label', Sfx.on ? 'Turn sound off' : 'Turn sound on');
+};
+showSound();
+soundBtn.addEventListener('click', () => { Sfx.start(); Sfx.toggle(); showSound(); });
+
+readTheme();
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', readTheme);
+new MutationObserver(readTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+addEventListener('resize', resize);
+resize();
+// Starting fish: one of each kind plus a little school of neon fish
+for (const kind of ['clown', 'tang', 'angel', 'gold', 'puffer']) {
+  const s = randomSpot();
+  fishes.push(makeFish(kind, s.x, s.y));
+}
+{ const s = randomSpot(); addSchool(5, s.x, s.y); }
+countFish();
+requestAnimationFrame(frame);
+
+// Install as an app and play offline (only works when served over https or localhost)
+if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+  addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+}
+</script>
+</body>
+</html>
