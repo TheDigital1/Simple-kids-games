@@ -365,13 +365,13 @@ const VEHICLES = [
       rr(g, -50, -75, 50, 46, 7); g.fillStyle = '#bfe6ff'; g.fill();
       g.fillStyle = '#2b2f36'; rr(g, -75, 4, 120, 8, 3); g.fill();
     } },
-    { type: 'boom', at: [55, -40], box: [-20, -82, 106, 26], draw(g, gh) {
+    { type: 'boom', at: [15, -38], box: [-20, -82, 106, 26], draw(g, gh) {
       poly(g, [[-18, 8], [4, -12], [68, -80], [92, -70], [104, 20], [86, 24], [78, -46], [10, 12]]);
       fs(g, gh, '#ffb300');
       if (gh) return;
       g.fillStyle = '#6b7280'; circle(g, 80, -66, 7); g.fill(); circle(g, -4, 0, 7); g.fill();
     } },
-    { type: 'bucket', at: [150, -5], box: [-28, -28, 34, 34], draw(g, gh) {
+    { type: 'bucket', at: [110, -4], box: [-28, -28, 34, 34], draw(g, gh) {
       g.beginPath(); g.moveTo(-22, -25); g.lineTo(22, -25); g.quadraticCurveTo(32, 18, -8, 30); g.lineTo(-26, 22); g.closePath();
       fs(g, gh, '#7b8490');
       if (gh) return;
@@ -427,14 +427,14 @@ const VEHICLES = [
     } },
     { ...wheelPart(20, [30, 52]) },
   ] },
-  { name: 'Fire truck', say: 'A fire truck! Nee naw nee naw!', exit: 'drive', eyes: [[92, -30], [112, -28]], parts: [
+  { name: 'Fire truck', say: 'A fire truck! Nee naw nee naw!', exit: 'drive', eyes: [[54, -30], [74, -28]], parts: [
     { type: 'fireBody', at: [-40, 10], box: [-122, -57, 52, 32], draw(g, gh) {
       rr(g, -120, -55, 170, 85, 10); fs(g, gh, '#e53935');
       if (gh) return;
       g.fillStyle = '#ffffff'; rr(g, -120, -6, 170, 10, 2); g.fill();
       g.fillStyle = '#b71c1c'; rr(g, -105, -45, 60, 32, 6); g.fill(); rr(g, -35, -45, 60, 32, 6); g.fill();
     } },
-    { type: 'fireCab', at: [90, 5], box: [-42, -62, 57, 32], draw(g, gh) {
+    { type: 'fireCab', at: [52, 5], box: [-42, -62, 57, 32], draw(g, gh) {
       g.beginPath(); g.moveTo(-40, 30); g.lineTo(-40, -60); g.lineTo(10, -60); g.lineTo(50, -15); g.lineTo(55, 30); g.closePath();
       fs(g, gh, '#e53935');
       if (gh) return;
@@ -447,13 +447,13 @@ const VEHICLES = [
       if (gh) return;
       g.fillStyle = '#8a929c'; for (let x = -110; x < 60; x += 20) { rr(g, x, -6, 6, 12, 2); g.fill(); }
     } },
-    { type: 'siren', at: [70, -68], box: [-22, -22, 22, 6], draw(g, gh) {
+    { type: 'siren', at: [34, -68], box: [-22, -22, 22, 6], draw(g, gh) {
       g.beginPath(); g.moveTo(-20, 4); g.lineTo(-20, -6); g.quadraticCurveTo(-20, -20, 0, -20); g.quadraticCurveTo(20, -20, 20, -6); g.lineTo(20, 4); g.closePath();
       fs(g, gh, '#2b8cff');
       if (gh) return;
       g.fillStyle = 'rgba(255,255,255,0.6)'; g.beginPath(); g.ellipse(-7, -10, 5, 3, -0.4, 0, TAU); g.fill();
     } },
-    wheelPart(30, [-110, 45]), wheelPart(30, [85, 45]),
+    wheelPart(30, [-110, 45]), wheelPart(30, [64, 45]),
   ] },
   { name: 'Rocket', say: 'A rocket! Three, two, one, blast off!', exit: 'rocket', eyes: [[-16, 12], [16, 12]], parts: [
     { type: 'rocketBody', at: [0, 0], box: [-47, -112, 47, 92], draw(g, gh) {

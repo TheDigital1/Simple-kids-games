@@ -1,6 +1,6 @@
 // Offline support: keep a copy of the game so it opens without internet.
 // Bump VERSION whenever a file below changes so devices pick up the new copy.
-const VERSION = 'car-wash-v2';
+const VERSION = 'car-wash-v3';
 const FILES = [
   './',
   'index.html',
