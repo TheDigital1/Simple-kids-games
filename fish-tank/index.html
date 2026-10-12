@@ -206,7 +206,7 @@ function tailFan(g, x, wag, color, line, len = 26, spread = 22) {
 }
 
 const KINDS = {
-  clown: { len: 70, speed: 70, draw(g, st) {
+  clown: { len: 70, speed: 95, draw(g, st) {
     tailFan(g, -36, st.wag, '#ff7a1a', '#b84a00');
     g.beginPath(); g.moveTo(-10, -24); g.quadraticCurveTo(8, -44, 26, -22); g.closePath(); outlineFill(g, '#ff7a1a', '#b84a00');
     g.beginPath(); g.ellipse(4, 0, 44, 25, 0, 0, TAU); outlineFill(g, '#ff7a1a', '#b84a00');
@@ -219,7 +219,7 @@ const KINDS = {
     g.beginPath(); g.ellipse(4, 0, 44, 25, 0, 0, TAU); g.strokeStyle = '#b84a00'; g.lineWidth = 3; g.stroke();
     fishEye(g, 30, -7, 6.5, st); fishMouth(g, 46, 6, st.mouth);
   } },
-  tang: { len: 82, speed: 85, draw(g, st) {
+  tang: { len: 82, speed: 115, draw(g, st) {
     tailFan(g, -40, st.wag, '#ffd23f', '#b38f00', 24, 24);
     g.beginPath(); g.moveTo(-34, -20); g.quadraticCurveTo(0, -46, 30, -24); g.closePath(); outlineFill(g, '#2563eb', '#123a91');
     g.beginPath(); g.moveTo(-34, 20); g.quadraticCurveTo(0, 40, 26, 24); g.closePath(); outlineFill(g, '#2563eb', '#123a91');
@@ -230,7 +230,7 @@ const KINDS = {
     g.beginPath(); g.ellipse(10, 10, 9, 5, 0.4, 0, TAU); g.fillStyle = '#ffd23f'; g.fill();
     fishEye(g, 30, -8, 6.5, st); fishMouth(g, 45, 5, st.mouth);
   } },
-  angel: { len: 72, speed: 55, draw(g, st) {
+  angel: { len: 72, speed: 75, draw(g, st) {
     tailFan(g, -30, st.wag, '#f3e7b0', '#a8945a', 24, 20);
     g.beginPath(); g.moveTo(-26, -8); g.quadraticCurveTo(-30, -60, -8, -72); g.quadraticCurveTo(6, -40, 14, -22); g.closePath(); outlineFill(g, '#f3e7b0', '#a8945a');
     g.beginPath(); g.moveTo(-26, 8); g.quadraticCurveTo(-30, 60, -8, 72); g.quadraticCurveTo(6, 40, 14, 22); g.closePath(); outlineFill(g, '#f3e7b0', '#a8945a');
@@ -242,7 +242,7 @@ const KINDS = {
     g.restore();
     fishEye(g, 26, -6, 6, st); fishMouth(g, 42, 4, st.mouth);
   } },
-  gold: { len: 76, speed: 60, draw(g, st) {
+  gold: { len: 76, speed: 80, draw(g, st) {
     // Flowing double tail
     g.save(); g.translate(-30, 0); g.rotate(st.wag * 1.3);
     for (const sy of [-1, 1]) {
@@ -255,7 +255,7 @@ const KINDS = {
     g.beginPath(); g.ellipse(10, 10, 24, 12, 0, 0, TAU); g.fillStyle = 'rgba(255, 230, 160, 0.7)'; g.fill();
     fishEye(g, 28, -7, 7, st); fishMouth(g, 43, 5, st.mouth);
   } },
-  puffer: { len: 62, speed: 45, draw(g, st) {
+  puffer: { len: 62, speed: 60, draw(g, st) {
     const p = 1 + st.puff * 0.45, r = 32 * p;
     tailFan(g, -r + 2, st.wag, '#e8c14a', '#9a7a14', 18, 14);
     if (st.puff > 0.05) {                                     // spikes pop out when puffed
@@ -272,7 +272,7 @@ const KINDS = {
     for (const [sx, sy] of [[-14, -14], [-2, -22], [-20, 2], [6, -10], [-10, -4]]) { g.beginPath(); g.arc(sx * p, sy * p, 3.5, 0, TAU); g.fill(); }
     fishEye(g, r * 0.5, -r * 0.25, 8, st); fishMouth(g, r - 2, r * 0.18, st.mouth);
   } },
-  neon: { len: 34, speed: 95, draw(g, st) {
+  neon: { len: 34, speed: 125, draw(g, st) {
     tailFan(g, -40, st.wag, 'rgba(220, 230, 255, 0.7)', 'rgba(120,140,180,0.8)', 20, 14);
     g.beginPath(); g.ellipse(0, 0, 46, 15, 0, 0, TAU); outlineFill(g, '#dfe7f2', '#7d8aa3');
     g.save(); g.beginPath(); g.ellipse(0, 0, 46, 15, 0, 0, TAU); g.clip();
@@ -695,7 +695,8 @@ function drawFish(f, t) {
   ctx.scale(f.face * L / 100, L / 100 * (1 + f.plump * 0.12));
   ctx.lineJoin = 'round'; ctx.lineCap = 'round';
   const speed = Math.hypot(f.vx, f.vy) / (f.speed * u);
-  const wag = Math.sin(t * (6 + speed * 8) + f.ph) * (0.25 + speed * 0.2);
+  // Calm tail: a slow, small swish that picks up a little when swimming fast
+  const wag = Math.sin(t * (3 + speed * 3) + f.ph) * (0.12 + speed * 0.08);
   k.draw(ctx, { wag, mouth: f.mouth, happy: f.happyT > 0 && f.happyT < 5.5 && f.mouth < 0.2, blink: f.blinkT > 0, puff: f.puff });
   ctx.restore();
   // A few sparkles around happy fish

@@ -1,6 +1,6 @@
 // Offline support: keep a copy of the game so it opens without internet.
 // Bump VERSION whenever a file below changes so devices pick up the new copy.
-const VERSION = 'fish-tank-v1';
+const VERSION = 'fish-tank-v2';
 const FILES = [
   './',
   'index.html',
