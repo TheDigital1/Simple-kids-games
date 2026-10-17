@@ -1,6 +1,7 @@
 // Offline support: keep a copy of the game so it opens without internet.
 // Bump VERSION whenever a file below changes so devices pick up the new copy.
 const VERSION = 'fish-tank-v2';
+const PREFIX = VERSION.replace(/v\d+$/, '');   // e.g. 'spark-count-'
 const FILES = [
   './',
   'index.html',
@@ -19,7 +20,8 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== VERSION).map(k => caches.delete(k))))
+      // All the games share one website, so only clear out this game's own old copies
+      .then(keys => Promise.all(keys.filter(k => k !== VERSION && k.startsWith(PREFIX)).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
