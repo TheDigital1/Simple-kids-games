@@ -59,6 +59,26 @@
   }
   #sound { min-width: 46px; padding: 10px 12px; font-size: 20px; }
   #controls button:focus-visible { outline: 3px solid var(--btn-fg); outline-offset: 2px; }
+  #picker {
+    position: fixed; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 22px; padding: 16px;
+    background: var(--bg); transition: opacity 0.4s;
+  }
+  #picker.hidden { opacity: 0; pointer-events: none; }
+  #picker h1 {
+    margin: 0; text-align: center;
+    font: 900 34px/1.2 "Trebuchet MS", "Arial Black", system-ui, sans-serif;
+    color: var(--btn-fg);
+  }
+  #picker .choices { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; max-width: 520px; }
+  #picker button {
+    font: 900 30px/1 "Trebuchet MS", "Arial Black", system-ui, sans-serif;
+    color: #fff; border: 0; border-radius: 22px; cursor: pointer;
+    min-width: 92px; padding: 24px 18px;
+    box-shadow: 0 6px 0 rgba(0, 0, 0, 0.25);
+  }
+  #picker button:active { transform: translateY(4px); box-shadow: 0 2px 0 rgba(0, 0, 0, 0.25); }
+  #picker button:focus-visible { outline: 4px solid var(--btn-fg); outline-offset: 3px; }
   .note {
     position: fixed; top: 0; left: 0; max-width: 60%;
     margin: calc(env(safe-area-inset-top, 0px) + 16px) 0 0 16px;
@@ -74,6 +94,16 @@
   <button id="reset" type="button">Start over</button>
 </div>
 <div id="hint">Tap to count!</div>
+<div id="picker">
+  <h1>Count to…</h1>
+  <div class="choices">
+    <button type="button" data-max="10" style="background:#e8553d">10</button>
+    <button type="button" data-max="20" style="background:#e0a019">20</button>
+    <button type="button" data-max="30" style="background:#3fa34d">30</button>
+    <button type="button" data-max="50" style="background:#2f86d6">50</button>
+    <button type="button" data-max="100" style="background:#8a4fd6">100</button>
+  </div>
+</div>
 <script>
 const canvas = document.getElementById('c');
 const hint = document.getElementById('hint');
@@ -771,6 +801,7 @@ const dtx = new Float32Array(DMAX), dty = new Float32Array(DMAX);
 const dSize = new Float32Array(DMAX), dWob = new Float32Array(DMAX);
 const dHue = new Uint16Array(DMAX);
 let dn = 0, holdTimer = 0, count = 0, numCY = 0;
+let maxCount = 10;                            // after this number, counting starts back at 1
 
 function burst(x, y, n, power, hue) {
   for (let i = 0; i < n; i++) {
@@ -861,7 +892,7 @@ if (!voiceOK) showNote('No voice here. Open this page in Chrome to hear the numb
 
 function countUp(x, y) {
   if (dn) explodeDigits();
-  count++;
+  count = count >= maxCount ? 1 : count + 1;
   const hue = (count * 47) % 360;
   burst(x, y, 70, 0.8, hue);
   const pts = pointsForNumber(count);
@@ -1078,11 +1109,22 @@ const showSound = () => {
 };
 showSound();
 soundBtn.addEventListener('click', () => { Sfx.start(); Sfx.toggle(); showSound(); });
+// Pick how high to count before starting back at 1
+const picker = document.getElementById('picker');
+for (const b of picker.querySelectorAll('button[data-max]')) {
+  b.addEventListener('click', () => {
+    Sfx.start();
+    maxCount = Number(b.dataset.max);
+    count = 0;
+    picker.classList.add('hidden');
+    hint.style.opacity = 1;
+  });
+}
 document.getElementById('reset').addEventListener('click', () => {
   Sfx.start();
   explodeDigits();
   count = 0;
-  hint.style.opacity = 1;
+  picker.classList.remove('hidden');
 });
 
 // Install as an app and play offline (only works when served over https or localhost)
