@@ -2,7 +2,7 @@
 
 Small, self-contained browser games for kids. Each game is a single HTML file — open it in a browser, no install or build step needed.
 
-**[▶ Play Spark Count now](https://thedigital1.github.io/Simple-kids-games/spark-count/)** · **[▶ Play Bubble Pop now](https://thedigital1.github.io/Simple-kids-games/bubble-pop/)** · **[▶ Play Bubble Gum now](https://thedigital1.github.io/Simple-kids-games/bubble-gum/)** · **[▶ Play Build It! now](https://thedigital1.github.io/Simple-kids-games/build-it/)** · **[▶ Play Car Wash now](https://thedigital1.github.io/Simple-kids-games/car-wash/)** · **[▶ Play Fish Tank now](https://thedigital1.github.io/Simple-kids-games/fish-tank/)**
+**[▶ Play Spark Count now](https://thedigital1.github.io/Simple-kids-games/spark-count/)** · **[▶ Play Bubble Pop now](https://thedigital1.github.io/Simple-kids-games/bubble-pop/)** · **[▶ Play Bubble Gum now](https://thedigital1.github.io/Simple-kids-games/bubble-gum/)** · **[▶ Play Build It! now](https://thedigital1.github.io/Simple-kids-games/build-it/)** · **[▶ Play Car Wash now](https://thedigital1.github.io/Simple-kids-games/car-wash/)** · **[▶ Play Fish Tank now](https://thedigital1.github.io/Simple-kids-games/fish-tank/)** · **[▶ Play Splash Yard now](https://thedigital1.github.io/Simple-kids-games/splash-yard/)**
 
 ## Games
 
@@ -14,6 +14,7 @@ Small, self-contained browser games for kids. Each game is a single HTML file �
 | Build It! | [▶ Play now](https://thedigital1.github.io/Simple-kids-games/build-it/) | A little truck tips out a load of parts. Drag each one onto its blueprint outline to build a car, a digger, a tractor, an airplane, a fire truck and a rocket — then watch it come alive and drive or fly away! No timer; a pointing hand helps if you get stuck. |
 | Car Wash | [▶ Play now](https://thedigital1.github.io/Simple-kids-games/car-wash/) | Muddy vehicles roll into the wash bay looking grumpy. Rub with your finger to scrub off the mud, rinse away the soap with the hose, then wipe off the drops until it sparkles — it cheers up as it gets cleaner, honks thank you and drives off. No timer, no score. |
 | Fish Tank | [▶ Play now](https://thedigital1.github.io/Simple-kids-games/fish-tank/) | A big fish tank. Tap above the water to drop food and the fish race over to eat it — full fish get happy, do a loop and grow a little, and a snail tidies up anything that sinks. Tap the water to call fish over, tap a fish to make it wiggle (the pufferfish puffs up!), open the treasure chest for bubbles to pop, and add more fish. No score or timer. |
+| Splash Yard | [▶ Play now](https://thedigital1.github.io/Simple-kids-games/splash-yard/) | Hold your finger down to spray the garden hose wherever you point. Watered flowers grow and bloom, the dog barks and shakes himself off, the frog hops into puddles and the kiddie pool, the cat on the fence runs away, birds splash in the birdbath, and spraying the tree drops apples. Spray up into the sky for a rainbow. Water makes puddles and wet mud with worms, and the day slowly turns to night with fireflies and back. No score or timer. |
 
 ## Install as an app
 
